@@ -32,3 +32,19 @@ def test_prompt_injection_text_cannot_change_price_or_approval_rules() -> None:
     assert result.status == "ready_for_approval"
     assert result.items[0].unit_price == 120.0
     assert result.subtotal == 6000.0
+
+
+class FailingExtractor:
+    def extract(self, payload: OrderProcessRequest) -> ExtractionResult:
+        raise RuntimeError("local model unavailable")
+
+
+def test_provider_failure_routes_to_human_review() -> None:
+    result = process_order(
+        OrderProcessRequest(subject="Order", body="50 F-200"),
+        extractor=FailingExtractor(),
+    )
+    assert result.status == "requires_review"
+    assert result.items == []
+    assert result.subtotal == 0
+    assert [issue.type for issue in result.issues] == ["extraction_provider_unavailable"]
