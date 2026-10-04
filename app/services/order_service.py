@@ -13,7 +13,17 @@ DEFAULT_EXTRACTOR: OrderExtractor = RegexOrderExtractor()
 
 
 def process_order(payload: OrderProcessRequest, extractor: OrderExtractor = DEFAULT_EXTRACTOR) -> OrderProcessResponse:
-    extraction = extractor.extract(payload)
+    try:
+        extraction = extractor.extract(payload)
+    except Exception:
+        # External/local model failures must never bypass review or expose provider details.
+        return OrderProcessResponse(
+            status=OrderStatus.REQUIRES_REVIEW,
+            items=[],
+            issues=[ValidationIssue(sku="unknown", type="extraction_provider_unavailable")],
+            subtotal=0,
+        )
+
     items: list[OrderItem] = []
     issues: list[ValidationIssue] = []
 
