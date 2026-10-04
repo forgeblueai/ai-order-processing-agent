@@ -48,3 +48,34 @@ def test_unrecognized_order_is_sent_to_review() -> None:
     )
     assert response.status_code == 200
     assert response.json()["status"] == "requires_review"
+
+
+class FailingExtractor:
+    def extract(self, payload):
+        raise RuntimeError("provider details must not escape")
+
+
+def test_provider_failure_fails_closed_at_http_boundary() -> None:
+    app.dependency_overrides[get_order_extractor] = lambda: FailingExtractor()
+    try:
+        response = client.post(
+            "/api/v1/orders/process",
+            json={"subject": "Order Request", "body": "We need 50 F-200."},
+        )
+    finally:
+        app.dependency_overrides[get_order_extractor] = lambda: RegexOrderExtractor()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "requires_review"
+    assert data["items"] == []
+    assert data["subtotal"] == 0.0
+    assert data["issues"] == [
+        {
+            "sku": "unknown",
+            "type": "extraction_provider_unavailable",
+            "requested": None,
+            "available": None,
+        }
+    ]
+    assert "provider details must not escape" not in response.text
