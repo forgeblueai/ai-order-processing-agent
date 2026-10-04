@@ -11,7 +11,7 @@ from app.services.inventory_service import get_product
 
 # Sprint 1 placeholder. Sprint 2 replaces this extraction boundary with an LLM
 # that returns a strict structured schema. Business rules remain deterministic.
-ITEM_PATTERN = re.compile(r"(?P<quantity>\\d+)\\s*(?:x|×)?\\s*(?P<sku>F-200|PV-10|P-500)", re.IGNORECASE)
+ITEM_PATTERN = re.compile(r"(?P<quantity>\d+)\s*(?:x|×)?\s*(?P<sku>F-200|PV-10|P-500)", re.IGNORECASE)
 
 
 def _extract_items(text: str) -> list[tuple[str, int]]:
