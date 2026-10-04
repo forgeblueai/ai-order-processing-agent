@@ -1,7 +1,11 @@
 from fastapi.testclient import TestClient
 
+from app.ai.extractor import RegexOrderExtractor
+from app.api.orders import get_order_extractor
 from app.main import app
 
+
+app.dependency_overrides[get_order_extractor] = lambda: RegexOrderExtractor()
 client = TestClient(app)
 
 
