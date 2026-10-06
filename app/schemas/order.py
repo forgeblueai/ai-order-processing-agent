@@ -13,6 +13,8 @@ class OrderStatus(StrEnum):
     REQUIRES_REVIEW = "requires_review"
     REVIEWED = "reviewed"
     APPROVED = "approved"
+    RESPONSE_DRAFTED = "response_drafted"
+    RESPONSE_SENT = "response_sent"
     REJECTED = "rejected"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -41,7 +43,7 @@ class OrderProcessResponse(BaseModel):
     order_id: UUID | None = None
     status: OrderStatus
     items: list[OrderItem]
-    issues: list[ValidationIssue] = []
+    issues: list[ValidationIssue] = Field(default_factory=list)
     subtotal: float = Field(ge=0)
 
 
@@ -53,5 +55,7 @@ class OrderRecordResponse(BaseModel):
     items: list[OrderItem]
     issues: list[ValidationIssue]
     subtotal: float = Field(ge=0)
+    response_draft: str | None = None
+    response_sent_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
