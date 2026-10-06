@@ -1,4 +1,6 @@
+from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +38,15 @@ class ValidationIssue(BaseModel):
 
 
 class OrderProcessResponse(BaseModel):
+    order_id: UUID | None = None
     status: OrderStatus
     items: list[OrderItem]
     issues: list[ValidationIssue] = []
     subtotal: float = Field(ge=0)
+
+
+class OrderRecordResponse(BaseModel):
+    id: UUID
+    status: OrderStatus
+    created_at: datetime
+    updated_at: datetime
