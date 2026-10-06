@@ -1,4 +1,5 @@
 from app.ai.extractor import RegexOrderExtractor
+from app.ai.prompts import SYSTEM_PROMPT
 from app.schemas.extraction import ExtractedItem, ExtractionResult
 from app.schemas.order import OrderProcessRequest
 from app.services.order_service import process_order
@@ -14,6 +15,13 @@ def test_ambiguous_request_requires_clarification() -> None:
     result = RegexOrderExtractor().extract(OrderProcessRequest(subject="Order", body="Send us the usual filters, maybe around fifty."))
     assert result.items == []
     assert result.requires_clarification is True
+
+
+def test_system_prompt_locks_confidence_scale_and_forbids_extra_items() -> None:
+    assert "0.0 through 1.0 inclusive" in SYSTEM_PROMPT
+    assert "Never express confidence as a percentage" in SYSTEM_PROMPT
+    assert "never create extra items" in SYSTEM_PROMPT
+    assert "availability, pricing, delivery" in SYSTEM_PROMPT
 
 
 class LowConfidenceExtractor:
