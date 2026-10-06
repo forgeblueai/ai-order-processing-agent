@@ -14,3 +14,6 @@ class InMemoryOrderRepository:
 
     def get(self, order_id: UUID) -> OrderRecord | None:
         return self._orders.get(order_id)
+
+    def list(self) -> list[OrderRecord]:
+        return sorted(self._orders.values(), key=lambda order: order.created_at)
