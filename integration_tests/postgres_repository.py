@@ -12,7 +12,7 @@ from app.services.order_lifecycle import InvalidOrderTransition
 
 def test_migrated_postgres_repository_and_lifecycle() -> None:
     columns = {column["name"] for column in inspect(engine).get_columns("orders")}
-    assert {"id", "status", "subject", "body", "items_json", "issues_json", "subtotal", "created_at", "updated_at"} <= columns
+    assert {"id", "status", "subject", "body", "items_json", "issues_json", "subtotal", "response_draft", "response_sent_at", "created_at", "updated_at"} <= columns
 
     session = SessionLocal()
     try:
