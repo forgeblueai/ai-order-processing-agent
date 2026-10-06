@@ -8,6 +8,7 @@ on:
       - "app/ai/**"
       - "app/services/order_service.py"
       - "integration_tests/real_llm_smoke.py"
+      - "benchmarks/**"
       - ".github/workflows/real-llm-integration.yml"
 
 permissions:
@@ -54,6 +55,15 @@ jobs:
 
       - name: Run real LLM smoke test
         run: pytest -q integration_tests/real_llm_smoke.py
+
+      - name: Run real Qwen benchmark
+        run: python -m benchmarks.run_qwen
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-benchmark-report
+          path: benchmark-results/qwen-report.json
 
       - name: Show Ollama log on failure
         if: failure()
