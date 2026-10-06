@@ -20,6 +20,8 @@ class OrderModel(Base):
     items_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     issues_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     subtotal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    response_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -37,6 +39,8 @@ class SQLAlchemyOrderRepository:
             "items_json": json.dumps([item.model_dump(mode="json") for item in order.items]),
             "issues_json": json.dumps([issue.model_dump(mode="json") for issue in order.issues]),
             "subtotal": order.subtotal,
+            "response_draft": order.response_draft,
+            "response_sent_at": order.response_sent_at,
             "updated_at": order.updated_at,
         }
         if model is None:
@@ -71,6 +75,8 @@ class SQLAlchemyOrderRepository:
             items=tuple(OrderItem.model_validate(item) for item in json.loads(model.items_json)),
             issues=tuple(ValidationIssue.model_validate(issue) for issue in json.loads(model.issues_json)),
             subtotal=model.subtotal,
+            response_draft=model.response_draft,
+            response_sent_at=cls._as_utc(model.response_sent_at) if model.response_sent_at else None,
             created_at=cls._as_utc(model.created_at),
             updated_at=cls._as_utc(model.updated_at),
         )
