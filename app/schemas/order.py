@@ -4,8 +4,16 @@ from pydantic import BaseModel, Field
 
 
 class OrderStatus(StrEnum):
+    RECEIVED = "received"
+    EXTRACTED = "extracted"
+    VALIDATING = "validating"
     READY_FOR_APPROVAL = "ready_for_approval"
     REQUIRES_REVIEW = "requires_review"
+    REVIEWED = "reviewed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class OrderProcessRequest(BaseModel):
