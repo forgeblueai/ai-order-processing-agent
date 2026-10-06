@@ -31,6 +31,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/orders_test
+      PYTHONPATH: .
 
     steps:
       - name: Check out repository
