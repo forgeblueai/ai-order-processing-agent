@@ -46,6 +46,12 @@ def process_order_endpoint(
     result = process_order(payload, extractor=extractor)
     orders.transition(record.id, OrderStatus.EXTRACTED)
     orders.transition(record.id, OrderStatus.VALIDATING)
+    orders.record_processing_result(
+        record.id,
+        items=result.items,
+        issues=result.issues,
+        subtotal=result.subtotal,
+    )
     orders.transition(record.id, result.status)
     return result.model_copy(update={"order_id": record.id})
 
