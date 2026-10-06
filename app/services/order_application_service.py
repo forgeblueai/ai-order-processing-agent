@@ -25,6 +25,9 @@ class OrderApplicationService:
             raise OrderNotFoundError(f"order not found: {order_id}")
         return order
 
+    def list(self) -> list[OrderRecord]:
+        return self._repository.list()
+
     def transition(self, order_id: UUID, target: OrderStatus) -> OrderRecord:
         current = self.get(order_id)
         validated_target = transition_order(current.status, target)
