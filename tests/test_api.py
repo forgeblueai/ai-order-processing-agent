@@ -100,3 +100,29 @@ def test_provider_failure_fails_closed_and_is_persisted_for_review() -> None:
     assert "provider details must not escape" not in response.text
     stored = client.get(f"/api/v1/orders/{data['order_id']}")
     assert stored.json()["status"] == "requires_review"
+
+
+def test_review_path_reaches_ready_then_approved_then_completed() -> None:
+    response = client.post(
+        "/api/v1/orders/process",
+        json={"subject": "Order Request", "body": "We need 20 PV-10."},
+    )
+    data = response.json()
+    order_id = data["order_id"]
+    assert data["status"] == "requires_review"
+
+    detail = client.get(f"/api/v1/orders/{order_id}").json()
+    assert detail["subject"] == "Order Request"
+    assert detail["body"] == "We need 20 PV-10."
+    assert detail["subtotal"] == 1500.0
+    assert detail["issues"][0]["type"] == "insufficient_stock"
+
+    assert client.post(f"/api/v1/orders/{order_id}/review").json()["status"] == "reviewed"
+    assert client.post(f"/api/v1/orders/{order_id}/ready").json()["status"] == "ready_for_approval"
+    assert client.post(f"/api/v1/orders/{order_id}/approve").json()["status"] == "approved"
+    assert client.post(f"/api/v1/orders/{order_id}/complete").json()["status"] == "completed"
+
+    final = client.get(f"/api/v1/orders/{order_id}").json()
+    assert final["status"] == "completed"
+    assert final["items"][0]["unit_price"] == 75.0
+    assert final["subtotal"] == 1500.0
