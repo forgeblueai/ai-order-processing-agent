@@ -10,6 +10,7 @@ from app.ai.ollama_provider import OllamaStructuredCompletionProvider
 from app.ai.provider import LLMOrderExtractor
 from app.adapters.sqlalchemy_order_repository import SQLAlchemyOrderRepository
 from app.db import SessionLocal
+from app.ports.customer_response_drafter import DeterministicCustomerResponseDrafter
 from app.schemas.order import OrderProcessRequest, OrderProcessResponse, OrderRecordResponse, OrderStatus
 from app.services.order_application_service import OrderApplicationService, OrderNotFoundError
 from app.services.order_lifecycle import InvalidOrderTransition
@@ -114,6 +115,34 @@ def mark_order_ready(
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
 ) -> OrderRecordResponse:
     return _transition_http(order_id, OrderStatus.READY_FOR_APPROVAL, orders)
+
+
+@router.post("/{order_id}/response/draft", response_model=OrderRecordResponse)
+def draft_customer_response(
+    order_id: UUID,
+    orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
+) -> OrderRecordResponse:
+    try:
+        record = orders.draft_customer_response(order_id, DeterministicCustomerResponseDrafter())
+    except OrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="order not found") from exc
+    except InvalidOrderTransition as exc:
+        raise HTTPException(status_code=409, detail="invalid order transition") from exc
+    return OrderRecordResponse.model_validate(record, from_attributes=True)
+
+
+@router.post("/{order_id}/response/send", response_model=OrderRecordResponse)
+def confirm_customer_response_sent(
+    order_id: UUID,
+    orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
+) -> OrderRecordResponse:
+    try:
+        record = orders.mark_response_sent(order_id)
+    except OrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="order not found") from exc
+    except InvalidOrderTransition as exc:
+        raise HTTPException(status_code=409, detail="invalid order transition") from exc
+    return OrderRecordResponse.model_validate(record, from_attributes=True)
 
 
 @router.post("/{order_id}/complete", response_model=OrderRecordResponse)
