@@ -120,9 +120,26 @@ def test_review_path_reaches_ready_then_approved_then_completed() -> None:
     assert client.post(f"/api/v1/orders/{order_id}/review").json()["status"] == "reviewed"
     assert client.post(f"/api/v1/orders/{order_id}/ready").json()["status"] == "ready_for_approval"
     assert client.post(f"/api/v1/orders/{order_id}/approve").json()["status"] == "approved"
+
+    blocked = client.post(f"/api/v1/orders/{order_id}/complete")
+    assert blocked.status_code == 409
+
+    drafted = client.post(f"/api/v1/orders/{order_id}/response/draft")
+    assert drafted.status_code == 200
+    assert drafted.json()["status"] == "response_drafted"
+    assert "PV-10" in drafted.json()["response_draft"]
+    assert drafted.json()["response_sent_at"] is None
+
+    sent = client.post(f"/api/v1/orders/{order_id}/response/send")
+    assert sent.status_code == 200
+    assert sent.json()["status"] == "response_sent"
+    assert sent.json()["response_sent_at"] is not None
+
     assert client.post(f"/api/v1/orders/{order_id}/complete").json()["status"] == "completed"
 
     final = client.get(f"/api/v1/orders/{order_id}").json()
     assert final["status"] == "completed"
+    assert final["response_draft"] is not None
+    assert final["response_sent_at"] is not None
     assert final["items"][0]["unit_price"] == 75.0
     assert final["subtotal"] == 1500.0
