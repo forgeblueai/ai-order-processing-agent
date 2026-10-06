@@ -42,7 +42,7 @@ def process_order_endpoint(
     extractor: Annotated[OrderExtractor, Depends(get_order_extractor)],
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
 ) -> OrderProcessResponse:
-    record = orders.create()
+    record = orders.create(subject=payload.subject, body=payload.body)
     result = process_order(payload, extractor=extractor)
     orders.transition(record.id, OrderStatus.EXTRACTED)
     orders.transition(record.id, OrderStatus.VALIDATING)
@@ -92,3 +92,27 @@ def reject_order(
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
 ) -> OrderRecordResponse:
     return _transition_http(order_id, OrderStatus.REJECTED, orders)
+
+
+@router.post("/{order_id}/review", response_model=OrderRecordResponse)
+def review_order(
+    order_id: UUID,
+    orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
+) -> OrderRecordResponse:
+    return _transition_http(order_id, OrderStatus.REVIEWED, orders)
+
+
+@router.post("/{order_id}/ready", response_model=OrderRecordResponse)
+def mark_order_ready(
+    order_id: UUID,
+    orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
+) -> OrderRecordResponse:
+    return _transition_http(order_id, OrderStatus.READY_FOR_APPROVAL, orders)
+
+
+@router.post("/{order_id}/complete", response_model=OrderRecordResponse)
+def complete_order(
+    order_id: UUID,
+    orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
+) -> OrderRecordResponse:
+    return _transition_http(order_id, OrderStatus.COMPLETED, orders)
