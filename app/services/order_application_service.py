@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.domain.order import OrderRecord
+from app.ports.customer_response_drafter import CustomerResponseDrafter
 from app.ports.order_repository import OrderRepository
 from app.schemas.order import OrderItem, OrderStatus, ValidationIssue
 from app.services.order_lifecycle import transition_order
@@ -40,6 +41,23 @@ class OrderApplicationService:
     ) -> OrderRecord:
         current = self.get(order_id)
         updated = current.with_processing_result(items=items, issues=issues, subtotal=subtotal)
+        self._repository.save(updated)
+        return updated
+
+    def draft_customer_response(self, order_id: UUID, drafter: CustomerResponseDrafter) -> OrderRecord:
+        current = self.get(order_id)
+        validated_target = transition_order(current.status, OrderStatus.RESPONSE_DRAFTED)
+        draft = drafter.draft(current).strip()
+        if not draft:
+            raise ValueError("customer response draft cannot be empty")
+        updated = current.with_response_draft(draft).with_status(validated_target)
+        self._repository.save(updated)
+        return updated
+
+    def mark_response_sent(self, order_id: UUID) -> OrderRecord:
+        current = self.get(order_id)
+        validated_target = transition_order(current.status, OrderStatus.RESPONSE_SENT)
+        updated = current.with_response_sent().with_status(validated_target)
         self._repository.save(updated)
         return updated
 
