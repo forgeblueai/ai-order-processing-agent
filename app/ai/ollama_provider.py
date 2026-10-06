@@ -4,6 +4,8 @@ from typing import Any
 
 import httpx
 
+from app.schemas.extraction import ExtractionResult
+
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "qwen3:8b"
@@ -36,7 +38,7 @@ class OllamaStructuredCompletionProvider:
             json={
                 "model": self._model,
                 "stream": False,
-                "format": "json",
+                "format": ExtractionResult.model_json_schema(),
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_text},
