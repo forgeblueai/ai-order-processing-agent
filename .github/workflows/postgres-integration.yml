@@ -1,0 +1,63 @@
+name: PostgreSQL Integration
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL 16 migration and integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: orders_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d orders_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/orders_test
+      PYTHONPATH: .
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply Alembic migrations
+        run: alembic upgrade head
+
+      - name: Verify migration is current
+        run: alembic current
+
+      - name: Run PostgreSQL integration test
+        run: pytest -q integration_tests/postgres_repository.py
+
+      - name: Verify downgrade and clean re-upgrade
+        run: |
+          alembic downgrade base
+          alembic upgrade head
