@@ -48,5 +48,10 @@ class OrderProcessResponse(BaseModel):
 class OrderRecordResponse(BaseModel):
     id: UUID
     status: OrderStatus
+    subject: str
+    body: str
+    items: list[OrderItem]
+    issues: list[ValidationIssue]
+    subtotal: float = Field(ge=0)
     created_at: datetime
     updated_at: datetime
