@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import DateTime, String, select
@@ -44,8 +44,15 @@ class SQLAlchemyOrderRepository:
         return [self._to_domain(model) for model in models]
 
     @staticmethod
-    def _to_domain(model: OrderModel) -> OrderRecord:
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    @classmethod
+    def _to_domain(cls, model: OrderModel) -> OrderRecord:
         return OrderRecord(
             id=UUID(model.id), status=OrderStatus(model.status),
-            created_at=model.created_at, updated_at=model.updated_at,
+            created_at=cls._as_utc(model.created_at),
+            updated_at=cls._as_utc(model.updated_at),
         )
