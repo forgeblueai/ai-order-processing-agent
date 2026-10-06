@@ -27,6 +27,7 @@ class BenchmarkReport:
     exception_detection_rate: float
     human_review_rate: float
     mean_processing_ms: float
+    case_results: list[dict]
 
 
 def load_corpus(path: Path) -> list[dict]:
@@ -36,6 +37,7 @@ def load_corpus(path: Path) -> list[dict]:
 def run_benchmark(extractor: OrderExtractor, corpus: list[dict]) -> BenchmarkReport:
     schema_ok = exact_ok = product_hits = product_total = exception_hits = exception_total = reviews = 0
     latencies: list[float] = []
+    case_results: list[dict] = []
 
     for case in corpus:
         payload = OrderProcessRequest(subject=case["subject"], body=case["body"])
@@ -43,8 +45,15 @@ def run_benchmark(extractor: OrderExtractor, corpus: list[dict]) -> BenchmarkRep
         started = perf_counter()
         try:
             extraction = extractor.extract(payload)
-        except Exception:
-            latencies.append((perf_counter() - started) * 1000)
+        except Exception as exc:
+            elapsed = (perf_counter() - started) * 1000
+            latencies.append(elapsed)
+            case_results.append({
+                "id": case["id"],
+                "schema_valid": False,
+                "error_type": type(exc).__name__,
+                "processing_ms": elapsed,
+            })
             continue
 
         schema_ok += 1
@@ -64,7 +73,19 @@ def run_benchmark(extractor: OrderExtractor, corpus: list[dict]) -> BenchmarkRep
         actual_exceptions = {issue.type for issue in result.issues}
         exception_total += len(expected_exceptions)
         exception_hits += len(expected_exceptions & actual_exceptions)
-        reviews += int(result.status.value == "requires_review")
+        review = result.status.value == "requires_review"
+        reviews += int(review)
+        case_results.append({
+            "id": case["id"],
+            "schema_valid": True,
+            "expected_items": expected_pairs,
+            "actual_items": actual_pairs,
+            "expected_exceptions": sorted(expected_exceptions),
+            "actual_exceptions": sorted(actual_exceptions),
+            "expected_review": bool(expected["requires_review"]),
+            "actual_review": review,
+            "processing_ms": latencies[-1],
+        })
 
     n = len(corpus)
     return BenchmarkReport(
@@ -82,6 +103,7 @@ def run_benchmark(extractor: OrderExtractor, corpus: list[dict]) -> BenchmarkRep
         exception_detection_rate=exception_hits / exception_total if exception_total else 1.0,
         human_review_rate=reviews / n if n else 0.0,
         mean_processing_ms=mean(latencies) if latencies else 0.0,
+        case_results=case_results,
     )
 
 
