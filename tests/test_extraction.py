@@ -24,6 +24,14 @@ def test_system_prompt_locks_confidence_scale_and_forbids_extra_items() -> None:
     assert "availability, pricing, delivery" in SYSTEM_PROMPT
 
 
+def test_system_prompt_locks_product_quantity_semantics() -> None:
+    assert '"50 F-200", 50 is the quantity' in SYSTEM_PROMPT
+    assert '"F-200" is the product_reference' in SYSTEM_PROMPT
+    assert "Never put a quantity into product_reference" in SYSTEM_PROMPT
+    assert "field mapping only" in SYSTEM_PROMPT
+    assert "never copy its SKU or quantity" in SYSTEM_PROMPT
+
+
 class LowConfidenceExtractor:
     def extract(self, payload: OrderProcessRequest) -> ExtractionResult:
         return ExtractionResult(intent="order_request", items=[ExtractedItem(product_reference="F-200", quantity=50, confidence=0.55)], confidence=0.55)
