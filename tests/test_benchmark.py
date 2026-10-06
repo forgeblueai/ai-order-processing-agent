@@ -19,3 +19,5 @@ def test_benchmark_control_proves_metric_pipeline() -> None:
     assert report.human_review_count == 4
     assert report.human_review_rate == 0.5
     assert report.mean_processing_ms >= 0
+    assert len(report.case_results) == len(corpus)
+    assert {case["id"] for case in report.case_results} == {case["id"] for case in corpus}
