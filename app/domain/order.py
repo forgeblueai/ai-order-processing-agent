@@ -16,6 +16,8 @@ class OrderRecord:
     items: tuple[OrderItem, ...] = ()
     issues: tuple[ValidationIssue, ...] = ()
     subtotal: float = 0.0
+    response_draft: str | None = None
+    response_sent_at: datetime | None = None
 
     @classmethod
     def create(cls, *, subject: str = "", body: str = "") -> "OrderRecord":
@@ -25,17 +27,12 @@ class OrderRecord:
     def with_status(self, status: OrderStatus) -> "OrderRecord":
         return replace(self, status=status, updated_at=datetime.now(UTC))
 
-    def with_processing_result(
-        self,
-        *,
-        items: list[OrderItem],
-        issues: list[ValidationIssue],
-        subtotal: float,
-    ) -> "OrderRecord":
-        return replace(
-            self,
-            items=tuple(items),
-            issues=tuple(issues),
-            subtotal=subtotal,
-            updated_at=datetime.now(UTC),
-        )
+    def with_processing_result(self, *, items: list[OrderItem], issues: list[ValidationIssue], subtotal: float) -> "OrderRecord":
+        return replace(self, items=tuple(items), issues=tuple(issues), subtotal=subtotal, updated_at=datetime.now(UTC))
+
+    def with_response_draft(self, draft: str) -> "OrderRecord":
+        return replace(self, response_draft=draft, updated_at=datetime.now(UTC))
+
+    def with_response_sent(self) -> "OrderRecord":
+        now = datetime.now(UTC)
+        return replace(self, response_sent_at=now, updated_at=now)
