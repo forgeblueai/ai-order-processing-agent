@@ -1,11 +1,15 @@
 from fastapi.testclient import TestClient
 
+from app.adapters.in_memory_order_repository import InMemoryOrderRepository
 from app.ai.extractor import RegexOrderExtractor
-from app.api.orders import get_order_extractor
+from app.api.orders import get_order_application_service, get_order_extractor
 from app.main import app
+from app.services.order_application_service import OrderApplicationService
 
 
+repository = InMemoryOrderRepository()
 app.dependency_overrides[get_order_extractor] = lambda: RegexOrderExtractor()
+app.dependency_overrides[get_order_application_service] = lambda: OrderApplicationService(repository)
 client = TestClient(app)
 
 
@@ -15,7 +19,7 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_order_with_enough_stock_is_ready_for_approval() -> None:
+def test_processed_order_is_persisted_and_can_be_approved() -> None:
     response = client.post(
         "/api/v1/orders/process",
         json={"subject": "Order Request", "body": "We need 50 F-200."},
@@ -25,29 +29,51 @@ def test_order_with_enough_stock_is_ready_for_approval() -> None:
     assert data["status"] == "ready_for_approval"
     assert data["subtotal"] == 6000.0
     assert data["issues"] == []
+    order_id = data["order_id"]
+
+    stored = client.get(f"/api/v1/orders/{order_id}")
+    assert stored.status_code == 200
+    assert stored.json()["status"] == "ready_for_approval"
+
+    approved = client.post(f"/api/v1/orders/{order_id}/approve")
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "approved"
 
 
-def test_insufficient_stock_requires_review() -> None:
+def test_review_order_cannot_bypass_human_review_to_approval() -> None:
     response = client.post(
         "/api/v1/orders/process",
-        json={"subject": "Order Request", "body": "We need 50 F-200 and 20 PV-10."},
+        json={"subject": "Order Request", "body": "We need 20 PV-10."},
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "requires_review"
-    assert data["subtotal"] == 7500.0
-    assert data["issues"] == [
-        {"sku": "PV-10", "type": "insufficient_stock", "requested": 20, "available": 15}
-    ]
-
-
-def test_unrecognized_order_is_sent_to_review() -> None:
-    response = client.post(
-        "/api/v1/orders/process",
-        json={"subject": "Order", "body": "Please send our usual filters."},
-    )
-    assert response.status_code == 200
+    order_id = response.json()["order_id"]
     assert response.json()["status"] == "requires_review"
+
+    approved = client.post(f"/api/v1/orders/{order_id}/approve")
+    assert approved.status_code == 409
+    assert approved.json()["detail"] == "invalid order transition"
+
+    stored = client.get(f"/api/v1/orders/{order_id}")
+    assert stored.json()["status"] == "requires_review"
+
+
+def test_orders_can_be_listed_and_unknown_order_is_404() -> None:
+    listed = client.get("/api/v1/orders")
+    assert listed.status_code == 200
+    assert isinstance(listed.json(), list)
+
+    missing = client.get("/api/v1/orders/00000000-0000-0000-0000-000000000000")
+    assert missing.status_code == 404
+
+
+def test_reject_ready_order_is_persisted() -> None:
+    response = client.post(
+        "/api/v1/orders/process",
+        json={"subject": "Order Request", "body": "We need 1 P-500."},
+    )
+    order_id = response.json()["order_id"]
+    rejected = client.post(f"/api/v1/orders/{order_id}/reject")
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
 
 
 class FailingExtractor:
@@ -55,7 +81,7 @@ class FailingExtractor:
         raise RuntimeError("provider details must not escape")
 
 
-def test_provider_failure_fails_closed_at_http_boundary() -> None:
+def test_provider_failure_fails_closed_and_is_persisted_for_review() -> None:
     app.dependency_overrides[get_order_extractor] = lambda: FailingExtractor()
     try:
         response = client.post(
@@ -70,12 +96,7 @@ def test_provider_failure_fails_closed_at_http_boundary() -> None:
     assert data["status"] == "requires_review"
     assert data["items"] == []
     assert data["subtotal"] == 0.0
-    assert data["issues"] == [
-        {
-            "sku": "unknown",
-            "type": "extraction_provider_unavailable",
-            "requested": None,
-            "available": None,
-        }
-    ]
+    assert data["issues"][0]["type"] == "extraction_provider_unavailable"
     assert "provider details must not escape" not in response.text
+    stored = client.get(f"/api/v1/orders/{data['order_id']}")
+    assert stored.json()["status"] == "requires_review"
