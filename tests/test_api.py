@@ -1,3 +1,7 @@
+import hashlib
+import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.adapters.in_memory_order_repository import InMemoryOrderRepository
@@ -10,7 +14,17 @@ from app.services.order_application_service import OrderApplicationService
 repository = InMemoryOrderRepository()
 app.dependency_overrides[get_order_extractor] = lambda: RegexOrderExtractor()
 app.dependency_overrides[get_order_application_service] = lambda: OrderApplicationService(repository)
-client = TestClient(app)
+_TEST_WORKFLOW_KEY = "test-only-multi-role-workflow-key-000000000000000000"
+client = TestClient(app, headers={"Authorization": f"Bearer {_TEST_WORKFLOW_KEY}"})
+
+
+@pytest.fixture(autouse=True)
+def configure_test_workflow_auth(monkeypatch):
+    digest = hashlib.sha256(_TEST_WORKFLOW_KEY.encode("utf-8")).hexdigest()
+    monkeypatch.setenv(
+        "ORDER_API_KEY_HASHES_JSON",
+        json.dumps({digest: ["operator", "reviewer", "approver", "sender"]}),
+    )
 
 
 def test_health() -> None:
