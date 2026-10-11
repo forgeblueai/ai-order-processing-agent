@@ -1,6 +1,7 @@
 from typing import Any, Protocol
 
 from app.ai.prompts import SYSTEM_PROMPT
+from app.ai.source_evidence import require_source_evidence
 from app.schemas.extraction import ExtractionResult
 from app.schemas.order import OrderProcessRequest
 
@@ -22,4 +23,7 @@ class LLMOrderExtractor:
             system_prompt=SYSTEM_PROMPT,
             user_text=f"Subject: {payload.subject}\nBody: {payload.body}",
         )
-        return ExtractionResult.model_validate(raw)
+        return require_source_evidence(
+            ExtractionResult.model_validate(raw),
+            source_text=f"{payload.subject}\n{payload.body}",
+        )
