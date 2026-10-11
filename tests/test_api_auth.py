@@ -5,7 +5,6 @@ All credentials in this test module are non-production, deterministic fixtures.
 
 import hashlib
 import json
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,6 +51,7 @@ def test_anonymous_request_denied_before_order_access(configured_auth, method, p
         def __getattribute__(self, name):
             raise AssertionError("order service must not be used by anonymous caller")
 
+    existing_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_order_application_service] = lambda: UnreachableService()
     try:
         response = _request(TestClient(app), method, path)
@@ -59,6 +59,7 @@ def test_anonymous_request_denied_before_order_access(configured_auth, method, p
         assert response.headers["www-authenticate"] == "Bearer"
     finally:
         app.dependency_overrides.clear()
+        app.dependency_overrides.update(existing_overrides)
 
 
 @pytest.mark.parametrize("method,path,role", _ROUTES)
@@ -69,12 +70,14 @@ def test_wrong_role_cannot_access_or_mutate(configured_auth, method, path, role)
         def __getattribute__(self, name):
             raise AssertionError("wrong role must never access the database")
 
+    existing_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_order_application_service] = lambda: UnreachableService()
     try:
         response = _request(TestClient(app), method, path, configured_auth[other_role])
         assert response.status_code == 403
     finally:
         app.dependency_overrides.clear()
+        app.dependency_overrides.update(existing_overrides)
 
 
 def test_missing_configuration_fails_closed(monkeypatch):
@@ -101,6 +104,7 @@ def test_valid_operator_can_list_empty_orders(configured_auth):
         def list(self):
             return []
 
+    existing_overrides = dict(app.dependency_overrides)
     app.dependency_overrides[get_order_application_service] = lambda: EmptyService()
     try:
         response = _request(TestClient(app), "GET", "/api/v1/orders", configured_auth["operator"])
@@ -108,6 +112,7 @@ def test_valid_operator_can_list_empty_orders(configured_auth):
         assert response.json() == []
     finally:
         app.dependency_overrides.clear()
+        app.dependency_overrides.update(existing_overrides)
 
 
 def test_public_health_stays_available_without_auth(monkeypatch):
