@@ -120,3 +120,29 @@ def test_public_health_stays_available_without_auth(monkeypatch):
     response = TestClient(app).get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_denied_approve_and_send_do_not_change_stored_state(configured_auth):
+    from app.adapters.in_memory_order_repository import InMemoryOrderRepository
+    from app.schemas.order import OrderStatus
+    from app.services.order_application_service import OrderApplicationService
+
+    orders = OrderApplicationService(InMemoryOrderRepository())
+    record = orders.create(subject="Sensitive customer", body="We need 2 F-200.")
+    initial_status = orders.get(record.id).status
+    existing_overrides = dict(app.dependency_overrides)
+    app.dependency_overrides[get_order_application_service] = lambda: orders
+    try:
+        api = TestClient(app)
+        denied_approval = _request(
+            api, "POST", f"/api/v1/orders/{record.id}/approve", configured_auth["operator"]
+        )
+        denied_send = _request(
+            api, "POST", f"/api/v1/orders/{record.id}/response/send", configured_auth["approver"]
+        )
+        assert denied_approval.status_code == 403
+        assert denied_send.status_code == 403
+        assert orders.get(record.id).status == initial_status == OrderStatus.RECEIVED
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(existing_overrides)
