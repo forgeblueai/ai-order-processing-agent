@@ -58,14 +58,14 @@ def process_order_endpoint(
     return result.model_copy(update={"order_id": record.id})
 
 
-@router.get("", response_model=list[OrderRecordResponse], dependencies=[Depends(require_role("operator"))])
+@router.get("", response_model=list[OrderRecordResponse])
 def list_orders(
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
 ) -> list[OrderRecordResponse]:
     return [OrderRecordResponse.model_validate(order, from_attributes=True) for order in orders.list()]
 
 
-@router.get("/{order_id}", response_model=OrderRecordResponse, dependencies=[Depends(require_role("operator"))])
+@router.get("/{order_id}", response_model=OrderRecordResponse)
 def get_order(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
