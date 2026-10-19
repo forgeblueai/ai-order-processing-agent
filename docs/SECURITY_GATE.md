@@ -31,7 +31,7 @@ Before this PR, the `app/api/orders.py` router lacked authentication and authori
 
 - `docker-compose.yml` binds the API to **127.0.0.1:8000 only**, not a wildcard host interface. This is a local demo configuration, **not** a production reverse proxy or a complete database/Ollama Compose stack.
 - Compose now fails at configuration time when `ORDER_API_KEY_HASHES_JSON` is missing. The container receives only SHA-256 token digests and their server-owned role mappings, not plaintext credentials.
-- Do not deploy with `uvicorn --host 0.0.0.0`, a public port forward, or a public reverse proxy until TLS, user identity, auditing, and deployment controls are reviewed. A valid static token alone is insufficient for public exposure.
+- Running Uvicorn on `0.0.0.0` **inside the container** is required for Docker port forwarding and is not itself a public exposure; the critical control is the **host-side loopback-only port bind**. Do not change the Compose host bind to `0.0.0.0`, open a public port forward, or add a public reverse proxy until TLS, identity, auditing, and deployment controls are reviewed. A valid static token alone is insufficient for public exposure.
 - Credentials must be generated securely and stored outside the repository. Environment variables and Compose configuration may be visible to local privileged users, so protect the development host.
 
 ## Tests
