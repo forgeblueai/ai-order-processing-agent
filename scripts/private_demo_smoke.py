@@ -79,9 +79,17 @@ def expect_status(
 
 def validated_lines(order: dict, expected: dict[str, tuple[int, float, int]], subtotal: float) -> None:
     actual = {item["sku"]: item for item in order["items"]}
-    assert len(order["items"]) == len(expected) == len(actual), (
-        "LLM line-item count is not reliable; no approval may proceed"
-    )
+    if len(order["items"]) != len(expected) or len(actual) != len(expected):
+        # This script uses ONLY two synthetic fixtures. Log field-level evidence,
+        # never bearer credentials, raw request bodies or provider response text.
+        actual_pairs = sorted((item["sku"], item["quantity"]) for item in order["items"])
+        issue_types = sorted({issue["type"] for issue in order["issues"]})
+        label = "stock-shortage" if expected == EXPECTED_SHORTAGE else "safe"
+        raise AssertionError(
+            f"Unreliable {label} Qwen extraction: expected {sorted(expected)}, "
+            f"got {actual_pairs}, status={order['status']}, issues={issue_types}; "
+            "aborting before any approval"
+        )
     for sku, (qty, price, available) in expected.items():
         assert sku in actual, f"Missing validated SKU {sku}; fail closed"
         line = actual[sku]
