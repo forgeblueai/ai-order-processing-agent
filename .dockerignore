@@ -1,0 +1,21 @@
+# Never put local secrets, synthetic order records or VCS history in the build context.
+.env
+.env.*
+.demo-credentials.json
+.demo-smoke-state.json
+.git
+.gitignore
+.github
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.db
+*.sqlite
+*.sqlite3
+tests/
+integration_tests/
+benchmarks/
+docs/
+scripts/
