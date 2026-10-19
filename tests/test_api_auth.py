@@ -146,3 +146,69 @@ def test_denied_approve_and_send_do_not_change_stored_state(configured_auth):
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(existing_overrides)
+
+
+def test_distinct_role_tokens_enforce_complete_review_lifecycle(configured_auth):
+    """Four independent identities must cooperate; no role can skip approval."""
+    from app.adapters.in_memory_order_repository import InMemoryOrderRepository
+    from app.ai.extractor import RegexOrderExtractor
+    from app.api.orders import get_order_extractor
+    from app.schemas.order import OrderStatus
+    from app.services.order_application_service import OrderApplicationService
+
+    orders = OrderApplicationService(InMemoryOrderRepository())
+    before = dict(app.dependency_overrides)
+    app.dependency_overrides[get_order_application_service] = lambda: orders
+    app.dependency_overrides[get_order_extractor] = lambda: RegexOrderExtractor()
+    try:
+        client = TestClient(app)
+        def action(method, url, role, **kwargs):
+            return client.request(
+                method,
+                url,
+                headers={"Authorization": f"Bearer {configured_auth[role]}"},
+                **kwargs,
+            )
+
+        submitted = action(
+            "POST",
+            "/api/v1/orders/process",
+            "operator",
+            json={"subject": "Private B2B test", "body": "We need 20 PV-10."},
+        )
+        assert submitted.status_code == 200
+        assert submitted.json()["status"] == "requires_review"
+        order_id = submitted.json()["order_id"]
+        base = f"/api/v1/orders/{order_id}"
+
+        # An operator must not be able to approve, even with an order ID.
+        assert action("POST", base + "/approve", "operator").status_code == 403
+        # An authenticated approver must still respect the state machine.
+        assert action("POST", base + "/approve", "approver").status_code == 409
+        assert orders.get(orders.list()[0].id).status == OrderStatus.REQUIRES_REVIEW
+
+        reviewed = action("POST", base + "/review", "reviewer")
+        assert reviewed.status_code == 200
+        assert reviewed.json()["status"] == "reviewed"
+        assert action("POST", base + "/ready", "reviewer").json()["status"] == "ready_for_approval"
+
+        approved = action("POST", base + "/approve", "approver")
+        assert approved.status_code == 200
+        assert approved.json()["status"] == "approved"
+
+        # A different role cannot confirm sending.
+        assert action("POST", base + "/response/send", "approver").status_code == 403
+        assert action("POST", base + "/response/draft", "sender").json()["status"] == "response_drafted"
+        # "send" records a human confirmation, NOT outbound email delivery.
+        assert action("POST", base + "/response/send", "sender").json()["status"] == "response_sent"
+        assert action("POST", base + "/complete", "sender").json()["status"] == "completed"
+
+        detail = action("GET", base, "operator")
+        assert detail.status_code == 200
+        assert detail.json()["status"] == "completed"
+        assert detail.json()["response_draft"] is not None
+        assert detail.json()["response_sent_at"] is not None
+        assert orders.get(orders.list()[0].id).status == OrderStatus.COMPLETED
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(before)
