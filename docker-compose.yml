@@ -1,5 +1,9 @@
+# Private local demo only. Not a complete DB/Ollama runtime.
 services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Only hashed bearer-token values. Fail at compose config time if missing.
+      ORDER_API_KEY_HASHES_JSON: ${ORDER_API_KEY_HASHES_JSON:?Set the hashed bearer token role mapping before starting}

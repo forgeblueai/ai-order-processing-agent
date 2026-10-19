@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.api.security import authenticate, require_role
 from app.ai.extractor import OrderExtractor
 from app.ai.ollama_provider import OllamaStructuredCompletionProvider
 from app.ai.provider import LLMOrderExtractor
@@ -16,7 +17,7 @@ from app.services.order_application_service import OrderApplicationService, Orde
 from app.services.order_lifecycle import InvalidOrderTransition
 from app.services.order_service import process_order
 
-router = APIRouter(prefix="/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(authenticate)])
 
 
 def get_order_extractor() -> OrderExtractor:
@@ -37,7 +38,7 @@ def get_order_application_service(
     return OrderApplicationService(SQLAlchemyOrderRepository(session))
 
 
-@router.post("/process", response_model=OrderProcessResponse)
+@router.post("/process", response_model=OrderProcessResponse, dependencies=[Depends(require_role("operator"))])
 def process_order_endpoint(
     payload: OrderProcessRequest,
     extractor: Annotated[OrderExtractor, Depends(get_order_extractor)],
@@ -85,7 +86,7 @@ def _transition_http(order_id: UUID, target: OrderStatus, orders: OrderApplicati
     return OrderRecordResponse.model_validate(record, from_attributes=True)
 
 
-@router.post("/{order_id}/approve", response_model=OrderRecordResponse)
+@router.post("/{order_id}/approve", response_model=OrderRecordResponse, dependencies=[Depends(require_role("approver"))])
 def approve_order(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -93,7 +94,7 @@ def approve_order(
     return _transition_http(order_id, OrderStatus.APPROVED, orders)
 
 
-@router.post("/{order_id}/reject", response_model=OrderRecordResponse)
+@router.post("/{order_id}/reject", response_model=OrderRecordResponse, dependencies=[Depends(require_role("approver"))])
 def reject_order(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -101,7 +102,7 @@ def reject_order(
     return _transition_http(order_id, OrderStatus.REJECTED, orders)
 
 
-@router.post("/{order_id}/review", response_model=OrderRecordResponse)
+@router.post("/{order_id}/review", response_model=OrderRecordResponse, dependencies=[Depends(require_role("reviewer"))])
 def review_order(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -109,7 +110,7 @@ def review_order(
     return _transition_http(order_id, OrderStatus.REVIEWED, orders)
 
 
-@router.post("/{order_id}/ready", response_model=OrderRecordResponse)
+@router.post("/{order_id}/ready", response_model=OrderRecordResponse, dependencies=[Depends(require_role("reviewer"))])
 def mark_order_ready(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -117,7 +118,7 @@ def mark_order_ready(
     return _transition_http(order_id, OrderStatus.READY_FOR_APPROVAL, orders)
 
 
-@router.post("/{order_id}/response/draft", response_model=OrderRecordResponse)
+@router.post("/{order_id}/response/draft", response_model=OrderRecordResponse, dependencies=[Depends(require_role("sender"))])
 def draft_customer_response(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -131,7 +132,7 @@ def draft_customer_response(
     return OrderRecordResponse.model_validate(record, from_attributes=True)
 
 
-@router.post("/{order_id}/response/send", response_model=OrderRecordResponse)
+@router.post("/{order_id}/response/send", response_model=OrderRecordResponse, dependencies=[Depends(require_role("sender"))])
 def confirm_customer_response_sent(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
@@ -145,7 +146,7 @@ def confirm_customer_response_sent(
     return OrderRecordResponse.model_validate(record, from_attributes=True)
 
 
-@router.post("/{order_id}/complete", response_model=OrderRecordResponse)
+@router.post("/{order_id}/complete", response_model=OrderRecordResponse, dependencies=[Depends(require_role("sender"))])
 def complete_order(
     order_id: UUID,
     orders: Annotated[OrderApplicationService, Depends(get_order_application_service)],
