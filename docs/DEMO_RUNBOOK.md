@@ -58,6 +58,8 @@ If Qwen extracts the wrong SKU/quantity or requests additional review, the test 
 
 ```bash
 docker compose restart api
+# Restart completes before the HTTP server necessarily becomes ready.
+timeout 90 bash -c 'until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 2; done'
 python3 scripts/private_demo_smoke.py verify
 ```
 
