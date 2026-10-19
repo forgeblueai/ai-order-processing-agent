@@ -13,7 +13,7 @@ Before this PR, the `app/api/orders.py` router lacked authentication and authori
 | Endpoint | Required role |
 | --- | --- |
 | POST /api/v1/orders/process | operator |
-| GET /api/v1/orders and GET /api/v1/orders/{id} | operator |
+| GET /api/v1/orders and GET /api/v1/orders/{id} | Any authenticated configured role (operator, reviewer, approver, sender) |
 | POST /api/v1/orders/{id}/review and /ready | reviewer |
 | POST /api/v1/orders/{id}/approve and /reject | approver |
 | POST /api/v1/orders/{id}/response/draft, /response/send and /complete | sender |
@@ -22,6 +22,7 @@ Before this PR, the `app/api/orders.py` router lacked authentication and authori
 - Missing or malformed server auth configuration: **503 fail closed**.
 - Missing/invalid Bearer credentials: **401**, without disclosing whether a token exists.
 - Valid credentials without a required role: **403**.
+- Read access is shared across the four configured roles **only within the current single-organization private Demo** so reviewers and approvers can inspect orders before taking action; this is not tenant isolation or per-record authorization.
 - Only an authorized actor reaches the existing state machine, which still rejects invalid transitions with **409**.
 - Client input cannot declare its own role; role assignments come entirely from server configuration.
 - Use independent, high-entropy tokens per role for real demonstrations. Generate with `secrets.token_urlsafe(32)`, store safely outside version control, and configure only SHA-256 digests.
@@ -38,7 +39,7 @@ Before this PR, the `app/api/orders.py` router lacked authentication and authori
 
 - `tests/test_api_auth.py`: anonymous and wrong-role access for **all ten routes**, invalid/missing configuration, invalid bearer, authenticated operator list, public health.
 - `tests/test_api.py`: existing order lifecycle integration tests now use a separate all-role **test-only** fixture credential; never reuse it outside tests.
-- `tests/test_api_auth.py` also verifies a complete lifecycle using **four distinct role-specific tokens**, and that a forbidden approve/send never changes stored state.
+- `tests/test_api_auth.py` also verifies a complete lifecycle using **four distinct role-specific tokens**, that all roles can read the order before review/approval, and that a forbidden approve/send never changes stored state.
 - `tests/test_private_demo_compose.py` prevents accidental wildcard port binds or omission of the required auth environment mapping.
 - All token hashes and role mappings in tests are generated in-memory from deliberately non-production fixture strings.
 
