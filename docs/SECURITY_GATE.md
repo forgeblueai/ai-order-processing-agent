@@ -27,10 +27,19 @@ Before this PR, the `app/api/orders.py` router lacked authentication and authori
 - Use independent, high-entropy tokens per role for real demonstrations. Generate with `secrets.token_urlsafe(32)`, store safely outside version control, and configure only SHA-256 digests.
 - In a private local testing session, calculate a digest with Python `hashlib.sha256(token.encode()).hexdigest()`. Never commit an example token as if it were a deployment secret.
 
+## Private demo network boundary
+
+- `docker-compose.yml` binds the API to **127.0.0.1:8000 only**, not a wildcard host interface. This is a local demo configuration, **not** a production reverse proxy or a complete database/Ollama Compose stack.
+- Compose now fails at configuration time when `ORDER_API_KEY_HASHES_JSON` is missing. The container receives only SHA-256 token digests and their server-owned role mappings, not plaintext credentials.
+- Do not deploy with `uvicorn --host 0.0.0.0`, a public port forward, or a public reverse proxy until TLS, user identity, auditing, and deployment controls are reviewed. A valid static token alone is insufficient for public exposure.
+- Credentials must be generated securely and stored outside the repository. Environment variables and Compose configuration may be visible to local privileged users, so protect the development host.
+
 ## Tests
 
 - `tests/test_api_auth.py`: anonymous and wrong-role access for **all ten routes**, invalid/missing configuration, invalid bearer, authenticated operator list, public health.
 - `tests/test_api.py`: existing order lifecycle integration tests now use a separate all-role **test-only** fixture credential; never reuse it outside tests.
+- `tests/test_api_auth.py` also verifies a complete lifecycle using **four distinct role-specific tokens**, and that a forbidden approve/send never changes stored state.
+- `tests/test_private_demo_compose.py` prevents accidental wildcard port binds or omission of the required auth environment mapping.
 - All token hashes and role mappings in tests are generated in-memory from deliberately non-production fixture strings.
 
 ## Before merge
