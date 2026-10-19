@@ -62,7 +62,7 @@ def test_anonymous_request_denied_before_order_access(configured_auth, method, p
         app.dependency_overrides.update(existing_overrides)
 
 
-@pytest.mark.parametrize("method,path,role", _ROUTES)
+@pytest.mark.parametrize("method,path,role", [entry for entry in _ROUTES if entry[0] != "GET"])
 def test_wrong_role_cannot_access_or_mutate(configured_auth, method, path, role):
     other_role = next(candidate for candidate in _TEST_KEYS if candidate != role)
 
@@ -187,6 +187,10 @@ def test_distinct_role_tokens_enforce_complete_review_lifecycle(configured_auth)
         assert action("POST", base + "/approve", "approver").status_code == 409
         assert orders.get(orders.list()[0].id).status == OrderStatus.REQUIRES_REVIEW
 
+        assert action("GET", base, "reviewer").status_code == 200
+        assert action("GET", base, "approver").status_code == 200
+        assert action("GET", "/api/v1/orders", "sender").status_code == 200
+
         reviewed = action("POST", base + "/review", "reviewer")
         assert reviewed.status_code == 200
         assert reviewed.json()["status"] == "reviewed"
@@ -209,6 +213,33 @@ def test_distinct_role_tokens_enforce_complete_review_lifecycle(configured_auth)
         assert detail.json()["response_draft"] is not None
         assert detail.json()["response_sent_at"] is not None
         assert orders.get(orders.list()[0].id).status == OrderStatus.COMPLETED
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(before)
+
+
+@pytest.mark.parametrize("role", ["operator", "reviewer", "approver", "sender"])
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/orders"),
+    ("GET", "/api/v1/orders/00000000-0000-0000-0000-000000000001"),
+])
+def test_authenticated_roles_can_inspect_orders_for_human_decisions(
+    configured_auth, role, method, path
+):
+    """Reading order details requires authentication, not a state-changing role."""
+    class ReadOnlyService:
+        def list(self):
+            return []
+
+        def get(self, order_id):
+            from app.services.order_application_service import OrderNotFoundError
+            raise OrderNotFoundError("not found")
+
+    before = dict(app.dependency_overrides)
+    app.dependency_overrides[get_order_application_service] = lambda: ReadOnlyService()
+    try:
+        response = _request(TestClient(app), method, path, configured_auth[role])
+        assert response.status_code == (200 if path.endswith("/orders") else 404)
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(before)
