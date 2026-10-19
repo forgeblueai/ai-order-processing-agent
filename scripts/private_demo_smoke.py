@@ -22,15 +22,15 @@ CREDS = ROOT / ".demo-credentials.json"
 STATE = ROOT / ".demo-smoke-state.json"
 HOST = "http://127.0.0.1:8000"
 SHORTAGE = "We need 2 F-200 and 20 PV-10."
+SINGLE_SHORTAGE = "Please send 20 PV-10."
 SAFE = "Please send 2 F-200."
 
 EXPECTED_SHORTAGE = {
     "F-200": (2, 120.0, 80),
     "PV-10": (20, 75.0, 15),
 }
-EXPECTED_SAFE = {
-    "F-200": (2, 120.0, 80),
-}
+EXPECTED_SINGLE_SHORTAGE = {"PV-10": (20, 75.0, 15)}
+EXPECTED_SAFE = {"F-200": (2, 120.0, 80)}
 
 
 def credentials() -> dict[str, str]:
@@ -98,11 +98,58 @@ def validated_lines(order: dict, expected: dict[str, tuple[int, float, int]], su
     assert abs(order["subtotal"] - subtotal) < 0.0001, "Backend subtotal does not match catalog"
 
 
+
+def validate_multi_sku_shortage(order: dict) -> bool:
+    """Diagnostic: complete extraction OR explicit, safely blocked partial result.
+
+    Never call a partly extracted order fully validated. The independent
+    one-SKU shortage fixture must prove real catalog stock checking.
+    """
+    expected = EXPECTED_SHORTAGE
+    actual = order["items"]
+    normalized = {item["sku"]: item for item in actual}
+    if len(normalized) != len(actual):
+        raise AssertionError("Duplicate product lines in multi-SKU model result")
+    if not set(normalized).issubset(expected):
+        raise AssertionError("Unexpected SKU in synthetic multi-SKU output")
+
+    for sku, item in normalized.items():
+        qty, price, stock = expected[sku]
+        assert (item["quantity"], item["unit_price"], item["available_stock"]) == (
+            qty, price, stock
+        ), "Inconsistent model quantity or backend catalog value for " + sku
+
+    assert order["status"] == "requires_review", (
+        "Stock-shortage or partially extracted order cannot be ready for approval"
+    )
+    types = {issue["type"] for issue in order["issues"]}
+    if set(normalized) == set(expected):
+        assert abs(order["subtotal"] - 1740.0) < 0.0001
+        assert any(
+            issue["type"] == "insufficient_stock" and issue["sku"] == "PV-10"
+            for issue in order["issues"]
+        ), "Missing deterministic stock shortfall issue for complete extraction"
+        return True
+
+    # The missing field must remain UNRESOLVED, not silently approved.
+    assert types.intersection(
+        {"requires_clarification", "missing_quantity", "missing_product_reference",
+         "extraction_provider_unavailable"}
+    ), "Partial LLM extraction missing human-review reason"
+    assert abs(
+        order["subtotal"] - sum(item["quantity"] * item["unit_price"] for item in actual)
+    ) < 0.0001, "Partial subtotal must only include actually validated lines"
+    return False
+
+
 def load_state() -> dict[str, str]:
     if not STATE.is_file():
         raise RuntimeError("Missing smoke state. Run the 'submit' phase first.")
     data = json.loads(STATE.read_text(encoding="utf-8"))
-    if not all(isinstance(data.get(key), str) for key in ("shortage", "safe")):
+    if not all(
+        isinstance(data.get(key), str)
+        for key in ("multi_shortage", "single_shortage", "safe")
+    ):
         raise RuntimeError("Invalid smoke state")
     return data
 
@@ -111,28 +158,43 @@ def submit(tokens: dict[str, str]) -> None:
     health = expect_status("GET", "/health", 200)
     assert health == {"status": "ok"}
     expect_status("GET", "/api/v1/orders", 401)
-    expect_status("POST", "/api/v1/orders/process", 403, token=tokens["reviewer"],
-                  body={"subject": "DENIED", "body": "We need 1 F-200."})
+    expect_status(
+        "POST", "/api/v1/orders/process", 403, token=tokens["reviewer"],
+        body={"subject": "DENIED", "body": "We need 1 F-200."},
+    )
     expect_status("GET", "/api/v1/orders", 200, token=tokens["reviewer"])
 
-    short = expect_status(
+    multi = expect_status(
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
-        body={"subject": "Synthetic stock-shortage order", "body": SHORTAGE},
+        body={"subject": "Synthetic multi-SKU stock-shortage diagnostic", "body": SHORTAGE},
     )
-    validated_lines(short, EXPECTED_SHORTAGE, 1740.0)
-    assert short["status"] == "requires_review", "Shortage MUST require human review"
-    assert any(issue["type"] == "insufficient_stock" and issue["sku"] == "PV-10"
-               for issue in short["issues"]), "Inventory shortage issue missing"
+    multi_complete = validate_multi_sku_shortage(multi)
+    # A flaky two-SKU extract must NOT suppress deterministic stock validation
+    # on a separate explicit one-SKU shortage input.
+    single = expect_status(
+        "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
+        body={"subject": "Synthetic single-SKU stock shortage", "body": SINGLE_SHORTAGE},
+    )
+    validated_lines(single, EXPECTED_SINGLE_SHORTAGE, 1500.0)
+    assert single["status"] == "requires_review"
+    assert any(
+        issue["type"] == "insufficient_stock" and issue["sku"] == "PV-10"
+        for issue in single["issues"]
+    ), "Real-model single-SKU stock shortage must be caught deterministically"
 
     safe = expect_status(
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
         body={"subject": "Synthetic safe order", "body": SAFE},
     )
     validated_lines(safe, EXPECTED_SAFE, 240.0)
-    assert safe["status"] == "ready_for_approval", (
-        "Safe order still requires review; do not bypass model safety/review guards"
-    )
-    state = {"shortage": short["order_id"], "safe": safe["order_id"]}
+    assert safe["status"] == "ready_for_approval"
+    assert safe["issues"] == []
+
+    state = {
+        "multi_shortage": multi["order_id"],
+        "single_shortage": single["order_id"],
+        "safe": safe["order_id"],
+    }
     old_mask = None
     try:
         import os
@@ -142,31 +204,59 @@ def submit(tokens: dict[str, str]) -> None:
     finally:
         if old_mask is not None:
             os.umask(old_mask)
-    print("PASS: real Qwen structured extraction, deterministic pricing/stock, and review routing.")
-    print("Restart only the API: docker compose restart api")
-    print("Then verify persistence: python scripts/private_demo_smoke.py verify")
+
+    outcome = "COMPLETE" if multi_complete else "PARTIAL — HUMAN REVIEW REQUIRED"
+    print(f"Multi-SKU diagnostic: {outcome}. No human approval or fulfillment performed.")
+    print("PASS: real Qwen single-SKU stock shortfall, safe order, deterministic prices, RBAC.")
+    print("Restart API, then run: python scripts/private_demo_smoke.py verify")
 
 
 def verify(tokens: dict[str, str]) -> None:
     state = load_state()
-    for name, order_id in state.items():
-        expected = EXPECTED_SHORTAGE if name == "shortage" else EXPECTED_SAFE
-        amount = 1740.0 if name == "shortage" else 240.0
-        detail = expect_status("GET", f"/api/v1/orders/{order_id}", 200, token=tokens["operator"])
-        validated_lines(detail, expected, amount)
-        assert detail["status"] == ("requires_review" if name == "shortage" else "ready_for_approval")
-        expect_status("GET", f"/api/v1/orders/{order_id}", 401)
-        expect_status("GET", f"/api/v1/orders/{order_id}", 200, token=tokens["approver"])
+    multi_id = state["multi_shortage"]
+    multi_url = f"/api/v1/orders/{multi_id}"
 
-    shortage_url = f"/api/v1/orders/{state['shortage']}"
+    multi = expect_status("GET", multi_url, 200, token=tokens["operator"])
+    # After an earlier verify() the reviewer may have acknowledged the issue.
+    assert multi["status"] in ("requires_review", "reviewed")
+    snapshot = multi.copy()
+    snapshot["status"] = "requires_review"
+    is_complete = validate_multi_sku_shortage(snapshot)
+
+    for key, expected, amount, status in (
+        ("single_shortage", EXPECTED_SINGLE_SHORTAGE, 1500.0, "requires_review"),
+        ("safe", EXPECTED_SAFE, 240.0, "ready_for_approval"),
+    ):
+        order_id = state[key]
+        url = f"/api/v1/orders/{order_id}"
+        detail = expect_status("GET", url, 200, token=tokens["operator"])
+        validated_lines(detail, expected, amount)
+        assert detail["status"] == status
+        expect_status("GET", url, 401)
+        expect_status("GET", url, 200, token=tokens["approver"])
+
+    # Two shortage variants must be blocked before approval.
+    single_url = f"/api/v1/orders/{state['single_shortage']}"
+    expect_status("POST", single_url + "/approve", 409, token=tokens["approver"])
+    expect_status("POST", multi_url + "/approve", 409, token=tokens["approver"])
+    if multi["status"] == "requires_review":
+        reviewed = expect_status("POST", multi_url + "/review", 200, token=tokens["reviewer"])
+        assert reviewed["status"] == "reviewed"
+    expect_status("POST", multi_url + "/ready", 409, token=tokens["reviewer"])
+    expect_status("POST", multi_url + "/approve", 409, token=tokens["approver"])
+
     safe_url = f"/api/v1/orders/{state['safe']}"
-    expect_status("POST", shortage_url + "/approve", 409, token=tokens["approver"])
     expect_status("POST", safe_url + "/approve", 403, token=tokens["operator"])
     expect_status("POST", safe_url + "/response/send", 403, token=tokens["approver"])
-    fresh = expect_status("GET", shortage_url, 200, token=tokens["reviewer"])
-    assert fresh["status"] == "requires_review", "Denied transition altered persisted shortage"
-    print("PASS: PostgreSQL persistence across API restart, role isolation, and human-approval boundary.")
-    print("Optionally run 'human' mode for an explicit human-controlled SAFE synthetic order flow.")
+    after = expect_status("GET", multi_url, 200, token=tokens["reviewer"])
+    assert after["status"] == "reviewed"
+    assert after["issues"] == multi["issues"], "Denied transition mutated unresolved issues"
+    print(
+        "PASS: PostgreSQL restart persistence, separate RBAC, and blocked review-to-ready "
+        "with unresolved issues."
+    )
+    print("Multi-SKU extraction evidence: " + ("COMPLETE" if is_complete else "PARTIAL; BLOCKED"))
+    print("Only an actual human may authorize the optional safe-order completion.")
 
 
 def human(tokens: dict[str, str]) -> None:
