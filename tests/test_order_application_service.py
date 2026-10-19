@@ -55,3 +55,34 @@ def test_invalid_transition_never_mutates_persisted_order() -> None:
 
     assert repository.get(created.id) == before
     assert repository.get(created.id).status is OrderStatus.RECEIVED
+
+
+@pytest.mark.parametrize(
+    "issue_type",
+    ["requires_clarification", "missing_quantity", "missing_product_reference",
+     "insufficient_stock", "extraction_provider_unavailable", "unknown_product"],
+)
+def test_review_acknowledgement_does_not_resolve_validation_issue(issue_type) -> None:
+    from app.schemas.order import ValidationIssue
+
+    repo = InMemoryOrderRepository()
+    service = OrderApplicationService(repo)
+    order = service.create(subject="Synthetic review", body="20 PV-10")
+    service.transition(order.id, OrderStatus.EXTRACTED)
+    service.transition(order.id, OrderStatus.VALIDATING)
+    service.record_processing_result(
+        order.id,
+        items=[],
+        issues=[ValidationIssue(sku="PV-10", type=issue_type)],
+        subtotal=0.0,
+    )
+    service.transition(order.id, OrderStatus.REQUIRES_REVIEW)
+    reviewed = service.transition(order.id, OrderStatus.REVIEWED)
+
+    with pytest.raises(InvalidOrderTransition, match="unresolved validation issues"):
+        service.transition(order.id, OrderStatus.READY_FOR_APPROVAL)
+
+    # Failed transition must not alter stored issues or status.
+    assert repo.get(order.id) == reviewed
+    assert service.get(order.id).status == OrderStatus.REVIEWED
+    assert service.transition(order.id, OrderStatus.REJECTED).status == OrderStatus.REJECTED
