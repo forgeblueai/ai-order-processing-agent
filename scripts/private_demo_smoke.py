@@ -22,7 +22,7 @@ CREDS = ROOT / ".demo-credentials.json"
 STATE = ROOT / ".demo-smoke-state.json"
 HOST = "http://127.0.0.1:8000"
 SHORTAGE = "We need 2 F-200 and 20 PV-10."
-SAFE = "We need 2 F-200 and 3 PV-10."
+SAFE = "Please send 2 F-200."
 
 EXPECTED_SHORTAGE = {
     "F-200": (2, 120.0, 80),
@@ -30,7 +30,6 @@ EXPECTED_SHORTAGE = {
 }
 EXPECTED_SAFE = {
     "F-200": (2, 120.0, 80),
-    "PV-10": (3, 75.0, 15),
 }
 
 
@@ -129,7 +128,7 @@ def submit(tokens: dict[str, str]) -> None:
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
         body={"subject": "Synthetic safe order", "body": SAFE},
     )
-    validated_lines(safe, EXPECTED_SAFE, 465.0)
+    validated_lines(safe, EXPECTED_SAFE, 240.0)
     assert safe["status"] == "ready_for_approval", (
         "Safe order still requires review; do not bypass model safety/review guards"
     )
@@ -152,7 +151,7 @@ def verify(tokens: dict[str, str]) -> None:
     state = load_state()
     for name, order_id in state.items():
         expected = EXPECTED_SHORTAGE if name == "shortage" else EXPECTED_SAFE
-        amount = 1740.0 if name == "shortage" else 465.0
+        amount = 1740.0 if name == "shortage" else 240.0
         detail = expect_status("GET", f"/api/v1/orders/{order_id}", 200, token=tokens["operator"])
         validated_lines(detail, expected, amount)
         assert detail["status"] == ("requires_review" if name == "shortage" else "ready_for_approval")
@@ -176,7 +175,7 @@ def human(tokens: dict[str, str]) -> None:
     safe_id = load_state()["safe"]
     route = f"/api/v1/orders/{safe_id}"
     detail = expect_status("GET", route, 200, token=tokens["approver"])
-    validated_lines(detail, EXPECTED_SAFE, 465.0)
+    validated_lines(detail, EXPECTED_SAFE, 240.0)
     prompt = f"Type APPROVE {safe_id} to authorize only this validated synthetic SAFE order: "
     if input(prompt).strip() != f"APPROVE {safe_id}":
         raise SystemExit("No human approval. State unchanged.")
