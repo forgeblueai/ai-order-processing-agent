@@ -32,3 +32,9 @@ jobs:
 
       - name: Run test suite
         run: pytest -q
+
+      - name: Validate private demo Compose configuration (no containers started)
+        env:
+          DEMO_DB_PASSWORD: ci-demo-only-not-a-secret
+          ORDER_API_KEY_HASHES_JSON: '{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa":["operator"]}'
+        run: docker compose config --quiet
