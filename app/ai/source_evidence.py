@@ -13,7 +13,7 @@ from app.schemas.extraction import ExtractionResult
 # explicitly supplies a SKU-shaped token that LLM output omits, fail closed.
 # Restrict to dash-number codes; other catalog formats need a later extension.
 _EXPLICIT_SKU_TOKEN = re.compile(
-    r"(?<![\\w-])([A-Za-z][A-Za-z0-9]{0,7}-[0-9]{1,6})(?![\\w-])",
+    r"(?<![\w-])([A-Za-z][A-Za-z0-9]{0,7}-[0-9]{1,6})(?![\w-])",
     flags=re.IGNORECASE,
 )
 
