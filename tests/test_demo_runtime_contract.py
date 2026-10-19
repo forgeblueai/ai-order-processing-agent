@@ -67,3 +67,57 @@ def test_api_image_contains_migrations_runs_nonroot_and_excludes_secrets() -> No
     for path in (".env", ".demo-credentials.json", ".demo-smoke-state.json"):
         assert path in dockerignore
         assert path in gitignore
+
+
+@pytest.fixture
+def multi_sku_order() -> dict:
+    return {
+        "items": [
+            {"sku": "F-200", "quantity": 2, "unit_price": 120.0, "available_stock": 80},
+            {"sku": "PV-10", "quantity": 20, "unit_price": 75.0, "available_stock": 15},
+        ],
+        "status": "requires_review",
+        "issues": [{"type": "insufficient_stock", "sku": "PV-10"}],
+        "subtotal": 1740.0,
+    }
+
+
+def test_multi_sku_complete_diagnostic_reports_full_stock_shortage(multi_sku_order: dict) -> None:
+    from scripts.private_demo_smoke import validate_multi_sku_shortage
+
+    assert validate_multi_sku_shortage(multi_sku_order) is True
+
+
+def test_multi_sku_omission_passes_only_as_incomplete_blocked_review(
+    multi_sku_order: dict,
+) -> None:
+    from scripts.private_demo_smoke import validate_multi_sku_shortage
+
+    multi_sku_order["items"] = multi_sku_order["items"][:1]
+    multi_sku_order["subtotal"] = 240.0
+    multi_sku_order["issues"] = [{"type": "requires_clarification", "sku": "unknown"}]
+    assert validate_multi_sku_shortage(multi_sku_order) is False
+
+
+@pytest.mark.parametrize("change", ["ready", "wrong_quantity", "no_issue", "invented_product"])
+def test_multi_sku_unsafe_partial_or_ready_never_passes(
+    multi_sku_order: dict, change: str,
+) -> None:
+    from scripts.private_demo_smoke import validate_multi_sku_shortage
+
+    multi_sku_order["items"] = multi_sku_order["items"][:1]
+    multi_sku_order["subtotal"] = 240.0
+    multi_sku_order["issues"] = [{"type": "requires_clarification", "sku": "unknown"}]
+    if change == "ready":
+        multi_sku_order["status"] = "ready_for_approval"
+    elif change == "wrong_quantity":
+        multi_sku_order["items"][0] = dict(multi_sku_order["items"][0], quantity=1)
+    elif change == "no_issue":
+        multi_sku_order["issues"] = []
+    else:
+        multi_sku_order["items"].append({
+            "sku": "P-500", "quantity": 1, "unit_price": 850.0,
+            "available_stock": 8,
+        })
+    with pytest.raises(AssertionError):
+        validate_multi_sku_shortage(multi_sku_order)
