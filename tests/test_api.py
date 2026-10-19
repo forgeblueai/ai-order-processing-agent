@@ -116,44 +116,67 @@ def test_provider_failure_fails_closed_and_is_persisted_for_review() -> None:
     assert stored.json()["status"] == "requires_review"
 
 
-def test_review_path_reaches_ready_then_approved_then_completed() -> None:
+def test_unresolved_stock_shortage_cannot_be_marked_ready_or_approved() -> None:
     response = client.post(
         "/api/v1/orders/process",
         json={"subject": "Order Request", "body": "We need 20 PV-10."},
     )
+    assert response.status_code == 200
     data = response.json()
     order_id = data["order_id"]
+    base = f"/api/v1/orders/{order_id}"
     assert data["status"] == "requires_review"
+    assert data["issues"][0]["type"] == "insufficient_stock"
+    assert data["subtotal"] == 1500.0
 
-    detail = client.get(f"/api/v1/orders/{order_id}").json()
-    assert detail["subject"] == "Order Request"
-    assert detail["body"] == "We need 20 PV-10."
-    assert detail["subtotal"] == 1500.0
-    assert detail["issues"][0]["type"] == "insufficient_stock"
+    assert client.post(base + "/review").json()["status"] == "reviewed"
 
-    assert client.post(f"/api/v1/orders/{order_id}/review").json()["status"] == "reviewed"
-    assert client.post(f"/api/v1/orders/{order_id}/ready").json()["status"] == "ready_for_approval"
-    assert client.post(f"/api/v1/orders/{order_id}/approve").json()["status"] == "approved"
+    # Human acknowledgement alone cannot resolve the physical stock shortfall.
+    ready = client.post(base + "/ready")
+    assert ready.status_code == 409
+    assert ready.json()["detail"] == "invalid order transition"
+    assert client.post(base + "/approve").status_code == 409
+    stored = client.get(base).json()
+    assert stored["status"] == "reviewed"
+    assert stored["issues"][0]["type"] == "insufficient_stock"
 
-    blocked = client.post(f"/api/v1/orders/{order_id}/complete")
-    assert blocked.status_code == 409
+    # A human approver can reject an unresolved order.
+    rejected = client.post(base + "/reject")
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
 
-    drafted = client.post(f"/api/v1/orders/{order_id}/response/draft")
+
+def test_safe_order_can_be_approved_drafted_recorded_sent_then_completed() -> None:
+    response = client.post(
+        "/api/v1/orders/process",
+        json={"subject": "Order Request", "body": "Please send 2 F-200."},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    order_id = data["order_id"]
+    base = f"/api/v1/orders/{order_id}"
+    assert data["status"] == "ready_for_approval"
+    assert data["issues"] == []
+    assert data["subtotal"] == 240.0
+
+    assert client.post(base + "/approve").json()["status"] == "approved"
+    assert client.post(base + "/complete").status_code == 409
+
+    drafted = client.post(base + "/response/draft")
     assert drafted.status_code == 200
     assert drafted.json()["status"] == "response_drafted"
-    assert "PV-10" in drafted.json()["response_draft"]
+    assert "F-200" in drafted.json()["response_draft"]
     assert drafted.json()["response_sent_at"] is None
 
-    sent = client.post(f"/api/v1/orders/{order_id}/response/send")
+    # Records an explicit human send confirmation, not an outbound email.
+    sent = client.post(base + "/response/send")
     assert sent.status_code == 200
     assert sent.json()["status"] == "response_sent"
     assert sent.json()["response_sent_at"] is not None
 
-    assert client.post(f"/api/v1/orders/{order_id}/complete").json()["status"] == "completed"
-
-    final = client.get(f"/api/v1/orders/{order_id}").json()
-    assert final["status"] == "completed"
-    assert final["response_draft"] is not None
-    assert final["response_sent_at"] is not None
-    assert final["items"][0]["unit_price"] == 75.0
-    assert final["subtotal"] == 1500.0
+    assert client.post(base + "/complete").json()["status"] == "completed"
+    completed = client.get(base).json()
+    assert completed["status"] == "completed"
+    assert completed["response_draft"] is not None
+    assert completed["items"][0]["unit_price"] == 120.0
+    assert completed["subtotal"] == 240.0
