@@ -1,4 +1,4 @@
-"""Real Ollama + PostgreSQL private-demo smoke (stdlib only).
+"""Evidence-first API + real Ollama fallback + PostgreSQL smoke (stdlib only).
 
 Phase 1: python scripts/private_demo_smoke.py submit
 Restart API with: docker compose restart api
@@ -24,6 +24,7 @@ HOST = "http://127.0.0.1:8000"
 SHORTAGE = "We need 2 F-200 and 20 PV-10."
 SINGLE_SHORTAGE = "Please send 20 PV-10."
 SAFE = "Please send 2 F-200."
+AMBIGUOUS = "We need PV-10. Please confirm availability."
 
 EXPECTED_SHORTAGE = {
     "F-200": (2, 120.0, 80),
@@ -79,13 +80,13 @@ def expect_status(
 def validated_lines(order: dict, expected: dict[str, tuple[int, float, int]], subtotal: float) -> None:
     actual = {item["sku"]: item for item in order["items"]}
     if len(order["items"]) != len(expected) or len(actual) != len(expected):
-        # This script uses ONLY two synthetic fixtures. Log field-level evidence,
+        # Synthetic fixtures only. Log field-level evidence,
         # never bearer credentials, raw request bodies or provider response text.
         actual_pairs = sorted((item["sku"], item["quantity"]) for item in order["items"])
         issue_types = sorted({issue["type"] for issue in order["issues"]})
         label = "stock-shortage" if expected == EXPECTED_SHORTAGE else "safe"
         raise AssertionError(
-            f"Unreliable {label} Qwen extraction: expected {sorted(expected)}, "
+            f"Invalid {label} evidence-first API result: expected {sorted(expected)}, "
             f"got {actual_pairs}, status={order['status']}, issues={issue_types}; "
             "aborting before any approval"
         )
@@ -148,7 +149,7 @@ def load_state() -> dict[str, str]:
     data = json.loads(STATE.read_text(encoding="utf-8"))
     if not all(
         isinstance(data.get(key), str)
-        for key in ("multi_shortage", "single_shortage", "safe")
+        for key in ("multi_shortage", "single_shortage", "safe", "model_diagnostic")
     ):
         raise RuntimeError("Invalid smoke state")
     return data
@@ -168,9 +169,11 @@ def submit(tokens: dict[str, str]) -> None:
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
         body={"subject": "Synthetic multi-SKU stock-shortage diagnostic", "body": SHORTAGE},
     )
+    # Unambiguous, fully consumed syntax goes through the narrow deterministic
+    # extractor. Missing a line here would be a regression, not LLM variance.
     multi_complete = validate_multi_sku_shortage(multi)
-    # A flaky two-SKU extract must NOT suppress deterministic stock validation
-    # on a separate explicit one-SKU shortage input.
+    assert multi_complete, "Evidence-first extractor omitted an explicit SKU"
+    # Independent explicit single-SKU shortage proves stock enforcement.
     single = expect_status(
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
         body={"subject": "Synthetic single-SKU stock shortage", "body": SINGLE_SHORTAGE},
@@ -180,7 +183,7 @@ def submit(tokens: dict[str, str]) -> None:
     assert any(
         issue["type"] == "insufficient_stock" and issue["sku"] == "PV-10"
         for issue in single["issues"]
-    ), "Real-model single-SKU stock shortage must be caught deterministically"
+    ), "Evidence-first single-SKU stock shortage must be caught deterministically"
 
     safe = expect_status(
         "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
@@ -190,10 +193,27 @@ def submit(tokens: dict[str, str]) -> None:
     assert safe["status"] == "ready_for_approval"
     assert safe["issues"] == []
 
+    # The free-form, incomplete input MUST go through real Ollama.
+    # It is allowed to extract nothing, but must never guess a quantity or
+    # reach ready_for_approval. Provider failure is not a valid LLM smoke pass.
+    model = expect_status(
+        "POST", "/api/v1/orders/process", 200, token=tokens["operator"],
+        body={"subject": "Synthetic ambiguous model-path diagnostic", "body": AMBIGUOUS},
+    )
+    assert model["status"] == "requires_review"
+    model_issue_types = {issue["type"] for issue in model["issues"]}
+    assert "extraction_provider_unavailable" not in model_issue_types, (
+        "Real Ollama provider call failed; do not count as an LLM smoke success"
+    )
+    assert not model["items"], "Ambiguous order must not have complete priced items"
+    assert "requires_clarification" in model_issue_types
+    assert model["subtotal"] == 0.0
+
     state = {
         "multi_shortage": multi["order_id"],
         "single_shortage": single["order_id"],
         "safe": safe["order_id"],
+        "model_diagnostic": model["order_id"],
     }
     old_mask = None
     try:
@@ -205,9 +225,9 @@ def submit(tokens: dict[str, str]) -> None:
         if old_mask is not None:
             os.umask(old_mask)
 
-    outcome = "COMPLETE" if multi_complete else "PARTIAL — HUMAN REVIEW REQUIRED"
-    print(f"Multi-SKU diagnostic: {outcome}. No human approval or fulfillment performed.")
-    print("PASS: real Qwen single-SKU stock shortfall, safe order, deterministic prices, RBAC.")
+    print("Explicit multi-SKU evidence-first extraction: COMPLETE.")
+    print("Real Ollama ambiguous-input diagnostic: REVIEW REQUIRED, zero priced items.")
+    print("PASS: deterministic SKU extraction, trusted stock/pricing, Ollama fallback, RBAC.")
     print("Restart API, then run: python scripts/private_demo_smoke.py verify")
 
 
@@ -245,6 +265,13 @@ def verify(tokens: dict[str, str]) -> None:
     expect_status("POST", multi_url + "/ready", 409, token=tokens["reviewer"])
     expect_status("POST", multi_url + "/approve", 409, token=tokens["approver"])
 
+    model_url = f"/api/v1/orders/{state['model_diagnostic']}"
+    model = expect_status("GET", model_url, 200, token=tokens["operator"])
+    assert model["status"] == "requires_review"
+    assert model["items"] == [] and model["subtotal"] == 0.0
+    expect_status("POST", model_url + "/approve", 409, token=tokens["approver"])
+    expect_status("GET", model_url, 200, token=tokens["reviewer"])
+
     safe_url = f"/api/v1/orders/{state['safe']}"
     expect_status("POST", safe_url + "/approve", 403, token=tokens["operator"])
     expect_status("POST", safe_url + "/response/send", 403, token=tokens["approver"])
@@ -255,7 +282,8 @@ def verify(tokens: dict[str, str]) -> None:
         "PASS: PostgreSQL restart persistence, separate RBAC, and blocked review-to-ready "
         "with unresolved issues."
     )
-    print("Multi-SKU extraction evidence: " + ("COMPLETE" if is_complete else "PARTIAL; BLOCKED"))
+    assert is_complete, "Evidence-first multi-SKU parser regressed after restart"
+    print("Evidence-first multi-SKU extraction: COMPLETE; Ollama ambiguous order: BLOCKED")
     print("Only an actual human may authorize the optional safe-order completion.")
 
 
