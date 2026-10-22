@@ -18,6 +18,8 @@ def test_ollama_provider_is_local_keyless_tool_free_and_schema_constrained() -> 
         body = json.loads(request.content)
         assert body["model"] == "qwen3:8b"
         assert body["stream"] is False
+        assert body["think"] is False
+        assert body["options"] == {"temperature": 0, "seed": 42}
         assert body["format"] == ExtractionResult.model_json_schema()
         assert body["format"]["title"] == "ExtractionResult"
         assert set(body["format"]["required"]) == {"intent", "confidence"}
