@@ -16,10 +16,10 @@ Status: **IN PROGRESS — not production-ready**. This document tracks evidence,
 
 | Gate | Required evidence | Current disposition |
 | --- | --- | --- |
-| G1 Reliability | PR #19 review, benchmark comparisons, acceptable safety regressions, green checks on final SHA | BLOCKED: review FN and exception recall regression require triage |
-| G2 Security | Authentication, RBAC, negative authorization tests, privacy checks | BLOCKED: API access control not established |
-| G3 Reproducibility | Full API + PostgreSQL + Ollama demo stack, fresh-start smoke, persistence check | BLOCKED: main compose only defines API |
-| G4 Portfolio | Accurate README, case study, walkthrough, demo script, release evidence | IN PROGRESS |
+| G1 Reliability | PR #19 benchmark on 85 synthetic cases, triple CI, fail-closed extraction evidence | **MERGED** via PR #19, merge SHA `e60cbef5c5ed7aa5853c481e606431b08aa07a5e`; benchmark v2 debt tracked in issue #23 |
+| G2 Security | Authenticated roles; denied-action tests; CI #76 / PostgreSQL #38 | **MERGED** via PR #22, merge SHA `ab1481147c33388b8a952d0b71d4e821eaecc80e`. Demo-private, not production IAM |
+| G3 Reproducibility | Full private Compose, Qwen3:0.6b, Alembic, real-model smoke and persistence | **IMPLEMENTING** on `feat/private-demo-runtime`; see issue #24 and `docs/DEMO_RUNBOOK.md`. No clean-stack proof yet |
+| G4 Portfolio | Accurate README, case study, walkthrough, release evidence | **BLOCKED** until G3 passes; README and versioned release remain unfinished |
 
 ## Invariants
 

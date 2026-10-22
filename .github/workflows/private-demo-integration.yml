@@ -1,0 +1,83 @@
+name: Private Demo Stack Integration
+
+# Runs on a G3 PR to test a REAL local Qwen model and PostgreSQL, not mocks.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker-compose.yml"
+      - "scripts/setup_demo_env.py"
+      - "scripts/private_demo_smoke.py"
+      - "app/**"
+      - "alembic/**"
+      - ".github/workflows/private-demo-integration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  private-demo:
+    name: Fresh Compose real-Qwen and persistence smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact PR commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate ephemeral local-only role secrets
+        run: python scripts/setup_demo_env.py
+
+      - name: Validate Compose contract
+        run: docker compose config --quiet
+
+      - name: Build and start private API database Ollama stack
+        run: docker compose up --build -d
+
+      - name: Require healthy API startup
+        run: |
+          for attempt in {1..36}; do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose ps
+          exit 1
+
+      - name: Verify REAL Qwen extraction and negative RBAC controls
+        run: python scripts/private_demo_smoke.py submit
+
+      - name: Restart only API while preserving PostgreSQL
+        run: docker compose restart api
+
+      - name: Wait for API readiness after restart
+        run: |
+          for attempt in {1..36}; do
+            if curl --fail --silent http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          exit 1
+
+      - name: Verify persisted orders and no unauthorized approval or sending
+        run: python scripts/private_demo_smoke.py verify
+
+      - name: Show container states on failure without leaking credentials
+        if: failure()
+        run: docker compose ps || true
+
+      - name: Remove ephemeral containers volumes and local credentials
+        if: always()
+        run: |
+          docker compose down --volumes --remove-orphans || true
+          rm -f .env .demo-credentials.json .demo-smoke-state.json
