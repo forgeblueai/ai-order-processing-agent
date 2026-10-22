@@ -206,7 +206,7 @@ def submit(tokens: dict[str, str]) -> None:
         "Real Ollama provider call failed; do not count as an LLM smoke success"
     )
     assert not model["items"], "Ambiguous order must not have complete priced items"
-    assert "requires_clarification" in model_issue_types
+    assert model_issue_types.intersection({"requires_clarification", "missing_quantity", "missing_product_reference"}), f"Ambiguous order lacks review evidence: {sorted(model_issue_types)}"
     assert model["subtotal"] == 0.0
 
     state = {
