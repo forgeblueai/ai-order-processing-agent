@@ -38,6 +38,11 @@ class OllamaStructuredCompletionProvider:
             json={
                 "model": self._model,
                 "stream": False,
+                # Bounded deterministic extraction profile for local Qwen3:
+                # no intermediate reasoning trace, greedy decoding, fixed seed.
+                # The benchmark corpus/scorer/threshold remain untouched.
+                "think": False,
+                "options": {"temperature": 0, "seed": 42},
                 "format": ExtractionResult.model_json_schema(),
                 "messages": [
                     {"role": "system", "content": system_prompt},
