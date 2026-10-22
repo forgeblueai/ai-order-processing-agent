@@ -77,7 +77,7 @@ Only after `submit` and `verify` succeed:
 python3 scripts/private_demo_smoke.py human
 ```
 
-A human must inspect the **safe synthetic order** and type an explicit approval phrase containing its UUID. A draft response is then generated deterministically; the human must type a second explicit phrase before the app records **SIMULATED send confirmation**. This **does not send email**. The stock-shortage order remains in `requires_review`, never silently fulfilled.
+The CLI first **prints validated SKU, quantity, trusted unit price, stock, order ID and subtotal** (without exposing credentials or raw customer text). A human must inspect this **safe synthetic order** and type an explicit approval phrase containing its UUID. Any non-ready order or unresolved validation issue blocks the prompt. A draft response is then generated deterministically; the human must type a second explicit phrase before the app records **SIMULATED send confirmation**. This **does not send email**. The stock-shortage order remains in `requires_review`, never silently fulfilled.
 
 The tokens are loaded from the private local credential file; the script never prints them.
 
