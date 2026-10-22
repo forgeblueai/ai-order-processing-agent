@@ -85,3 +85,30 @@ def test_incomplete_quality_report_cannot_be_fixed_by_faking_valid_count():
         "id": "needs_review", "schema_valid": False, "error_type": "ReadTimeout"
     }
     assert any("incomplete benchmark" in e for e in validate_report(report, CORPUS))
+
+
+def test_malformed_case_result_fails_closed_without_crashing():
+    report = sample_report()
+    report["case_results"][1] = "not-a-benchmark-object"
+    messages = validate_report(report, CORPUS)
+    assert any("malformed or duplicate IDs" in message for message in messages)
+    assert any("case_index_1:malformed_record" in message for message in messages)
+
+
+def test_non_object_report_and_malformed_corpus_are_rejected():
+    assert validate_report([], CORPUS) == ["benchmark report must be a JSON object"]
+    assert validate_report(sample_report(), ["invalid"]) == [
+        "frozen benchmark corpus has malformed cases"
+    ]
+    malformed = [{"id": "case", "expected": {"requires_review": "yes"}}]
+    assert validate_report(sample_report(), malformed) == [
+        "frozen benchmark corpus has malformed cases"
+    ]
+
+
+def test_schema_flag_must_be_literal_true_not_truthy():
+    report = sample_report()
+    report["case_results"][0]["schema_valid"] = 1
+    report["schema_valid_count"] = 1
+    errors = validate_report(report, CORPUS)
+    assert any("incomplete benchmark" in error for error in errors)
