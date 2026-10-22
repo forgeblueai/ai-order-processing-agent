@@ -259,6 +259,34 @@ def verify(tokens: dict[str, str]) -> None:
     print("Only an actual human may authorize the optional safe-order completion.")
 
 
+
+def format_human_approval_summary(order: dict) -> str:
+    """Show actual validated synthetic order facts before asking for approval.
+
+    Do not disclose bearer tokens, customer contact info, or any LLM chain of thought.
+    A reviewer must verify SKU, quantity, trusted price and stock in the terminal.
+    """
+    if order.get("status") != "ready_for_approval" or order.get("issues"):
+        raise AssertionError("Cannot request human approval of an unresolved order")
+    if not order.get("items"):
+        raise AssertionError("Cannot approve an order without validated items")
+    lines = [
+        "PRIVATE SYNTHETIC DEMO — HUMAN APPROVAL REQUIRED",
+        f"Order: {order['id']}",
+        f"Status: {order['status']}",
+        "Validated items (trusted catalog values):",
+    ]
+    for item in order["items"]:
+        lines.append(
+            f"  {item['sku']} x {item['quantity']} @ "
+            f"${item['unit_price']:.2f} "
+            f"(stock: {item['available_stock']})"
+        )
+    lines.append(f"Order subtotal: ${order['subtotal']:.2f}")
+    lines.append("No external email will be sent by this script.")
+    return "\n".join(lines)
+
+
 def human(tokens: dict[str, str]) -> None:
     # Do not proceed until the real model, persistence and forbidden-actions checks pass.
     verify(tokens)
@@ -266,6 +294,7 @@ def human(tokens: dict[str, str]) -> None:
     route = f"/api/v1/orders/{safe_id}"
     detail = expect_status("GET", route, 200, token=tokens["approver"])
     validated_lines(detail, EXPECTED_SAFE, 240.0)
+    print(format_human_approval_summary(detail))
     prompt = f"Type APPROVE {safe_id} to authorize only this validated synthetic SAFE order: "
     if input(prompt).strip() != f"APPROVE {safe_id}":
         raise SystemExit("No human approval. State unchanged.")
