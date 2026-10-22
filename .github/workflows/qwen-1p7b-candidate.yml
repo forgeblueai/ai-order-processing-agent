@@ -1,0 +1,73 @@
+name: Qwen 1.7B Candidate Evaluation
+
+# Independent optional model-capability experiment. Not a release gate and does
+# not modify the deployed 0.6B demo model, frozen corpus, scorer or threshold.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/qwen-1p7b-candidate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Real Qwen3 1.7B safety and extraction benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OLLAMA_MODEL: qwen3:1.7b
+      OLLAMA_URL: http://127.0.0.1:11434
+      PYTHONPATH: .
+    steps:
+      - name: Check out PR commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install local Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start local Ollama
+        run: |
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Pull candidate model
+        run: ollama pull "$OLLAMA_MODEL"
+
+      - name: Real-model smoke
+        run: pytest -q integration_tests/real_llm_smoke.py
+
+      - name: Run frozen 85-case benchmark without scorer changes
+        run: python -m benchmarks.run_qwen
+
+      - name: Enforce complete and fail-closed benchmark evidence
+        run: python -m benchmarks.check_report_integrity
+
+      - name: Upload candidate evidence even if rejected
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwen-1p7b-candidate-benchmark
+          path: benchmark-results/qwen-report.json
+          if-no-files-found: warn
+
+      - name: Show local model service log on failure
+        if: failure()
+        run: cat /tmp/ollama.log || true
