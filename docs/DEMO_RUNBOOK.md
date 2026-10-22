@@ -1,109 +1,97 @@
-# Private portfolio demo runbook — G3
+# Private Portfolio Demo — Evidence-First Hybrid Orders (G3)
 
-**Status: implementation in progress. Not production-ready. No public exposure or release.**
+**Status:** engineering validation in PR #25. No public deployment, tag or Release. All data is synthetic.
 
-This runbook describes a **single-organization, zero-paid-service, local-only** demo of the AI Order Processing Agent, including FastAPI, PostgreSQL 16, Alembic migrations, Ollama Qwen3 0.6B, role-specific authentication, and human approval. Only synthetic order data may be used.
+This private, single-organization demonstration runs FastAPI, PostgreSQL 16 and Ollama through Docker Compose, with four server-owned roles and mandatory human approval. It deliberately distinguishes **reliable deterministic extraction of fully explicit SKU orders** from **LLM extraction of free-form or ambiguous messages**. A passing hybrid Demo is not evidence that Qwen accurately extracts every request.
 
-## Prerequisites and limits
+## Extraction contract and truthful quality metrics
 
-- Docker Engine + Compose v2, Docker daemon access, Python 3.12+, sufficient free disk for two container images plus the Qwen model, and sufficient CPU/RAM for local inference. GPU is **not** required; CPU inference may take tens of seconds.
-- Network access is needed **once** to download Python and container images and the local Qwen model. The application does not use a paid LLM API.
-- Only port `127.0.0.1:8000` is published on the **host**. PostgreSQL and Ollama have no host port mappings. Do not forward port 8000 or connect a public reverse proxy.
-- The app image is built from Python 3.12 and runs as a non-root UID; Alembic migrations execute in a separate one-shot service before API startup.
-- **Inference profile under validation:** Ollama `/api/chat` is sent `think: false`, `options: {temperature: 0, seed: 42}` with Pydantic JSON schema. This is a separately labeled deterministic decoding experiment to reduce Qwen3 sampling variance and reasoning overhead; it **does not guarantee semantic accuracy** or zero timeouts. Scores gathered under the earlier default-generation profile must not be treated as directly comparable to scores under this configuration.
-- **Version caveat:** the Docker images currently use `postgres:16-alpine` and `ollama/ollama:latest`, which are mutable tags. Freeze image digests for any audited release; this is not a production supply-chain guarantee.
+Two separate paths operate under the same pricing, stock and state-machine rules:
 
-## 1. Start from an approved checkout
+1. **Evidence-first**: a body consisting *entirely* of an explicit English order command and one or more `quantity SKU` terms (e.g. `Please send 20 PV-10.` or `We need 2 F-200 and 20 PV-10.`) is parsed deterministically. Complete-string match, distinct SKU names, explicit quantities, source-evidence validation, and catalog lookup are required. No LLM call is necessary for this narrow syntax. Unknown SKU goes to review; insufficient stock is detected by deterministic application logic.
+2. **LLM fallback**: all other bodies (ambiguous quantities, generic names, extra clauses, pricing notes, instructions, multiline or unsupported syntax) go through Qwen via Ollama. The Pydantic schema and source-evidence guards remain in effect. Missing fields, invented SKU/quantity, provider failure, low confidence or other validation issues must enter human review. No invented amount or line is silently inserted.
 
-Use the intended PR #G3 commit. **Do not demo from an unreviewed branch as though it were released.**
+This is an **explicit architecture change**, not a claim of improvement to Qwen's weights or its extraction accuracy. The **frozen 85-case LLM-only benchmark** still calls `LLMOrderExtractor` directly and uses its unchanged corpus, scorer and confidence threshold. It must be reported independently from these evidence-first API tests. No hybrid accuracy figure is published until a distinct, versioned, representative hybrid corpus is evaluated.
+
+The default demo uses `qwen3:0.6b`, Ollama `think: false`, `temperature: 0`, `seed: 42`. Qwen3 1.7B thinking is a *separate unapproved candidate experiment*. Neither model reliably extracts every simple order in raw-LLM-only evaluation; fail-closed safety is not the same as high extraction quality.
+
+## Prerequisites / deployment boundary
+
+- Docker Engine + Compose v2 and Python 3.12+, free disk for two service images and Qwen model, CPU/RAM for local inference; internet initially to download images and the model.
+- API is published on **host loopback only** at `127.0.0.1:8000`; PostgreSQL and Ollama are internal, without published host ports. Never expose to the internet.
+- Containers initialize PostgreSQL, run Alembic migrations, pull the local model, then start the API after healthy dependencies. The application image runs as non-root.
+- Container image tags (`postgres:16-alpine` and `ollama/ollama:latest`) are mutable; pin reviewed digests for audited release. There is no paid LLM API, production IAM or tenant isolation.
+- Static digest-configured Bearer tokens are only acceptable for this local private demonstration; no customer PII or real orders.
+
+## Set up the private environment
+
+From the intended PR #25 working tree:
 
 ```bash
 git switch feat/private-demo-runtime
 git pull --ff-only
-
 python3 scripts/setup_demo_env.py
 docker compose config --quiet
 docker compose up --build -d --wait --wait-timeout 1500
 docker compose ps
-curl --fail http://127.0.0.1:8000/health
+curl -fsS http://127.0.0.1:8000/health
 ```
 
-The generator writes:
-- `.env` (PostgreSQL password and **hashed** role-token mapping);
-- `.demo-credentials.json` (four independent **plaintext** role tokens).
+`setup_demo_env.py` creates local, private mode-0600 files: `.env` for a random database password and hashed role mapping, and `.demo-credentials.json` for separate raw test credentials. Both are ignored by Git and Docker build context. The tool never prints token values or overwrites existing files. Never paste credentials or unredacted logs into GitHub.
 
-Both files are local-only, mode `0600`, excluded from Git and Docker build context. No secrets or bearer tokens should be pasted into issues, logs, screenshots, or demo videos. They are intentionally **not** printed. Running the generator again will refuse to overwrite active credentials.
-
-The `postgres` service must become healthy before `db-migrate` runs `alembic upgrade head`. The `ollama` service must be ready before `model-init` pulls `qwen3:0.6b`. Both one-shot bootstrap services must finish successfully before the API starts.
-
-If `docker compose up` fails, inspect `docker compose ps` first. Treat unexpected credential or raw database URL appearances in logs as potentially sensitive. Do not attach unredacted logs to public PRs.
-
-## 2. Exercise the REAL model and negative authorization
+## Noninteractive acceptance: hybrid plus actual Ollama fallback
 
 ```bash
 python3 scripts/private_demo_smoke.py submit
 ```
 
-This invokes the real API and Ollama provider (not a mock). It verifies:
-- GET orders without Bearer token returns `401`;
-- wrong-role process returns `403`;
-- authenticated reviewer can view orders;
-- the **two-SKU diagnostic** `We need 2 F-200 and 20 PV-10.` is inspected for exact item coverage. If both lines are extracted, the catalog subtotal must be `1740.00` and stock shortfall must be identified. If the LLM omits a line, the output is **explicitly classified PARTIAL / REQUIRES_REVIEW** with unresolved clarification; its subtotal is only a *partial validated subtotal*, never the full requested order amount. A partial case cannot be approved;
-- a **separate real-model single-SKU shortage** `Please send 20 PV-10.` must extract PV-10 × 20, use trusted price `75.00`, calculate `1500.00`, and return `requires_review` with `insufficient_stock` against stock 15. This independently proves inventory control even when multi-SKU extraction is incomplete;
-- a **separate real-model safe order** `Please send 2 F-200.` must yield trusted subtotal `240.00` and `ready_for_approval`.
+Four synthetic orders are processed via the real API:
 
-For regression coverage, `tests/test_source_evidence.py` also verifies that the *previous* two-SKU normal-path message (`We need 2 F-200 and 3 PV-10.`) cannot become `ready_for_approval` when Qwen drops `PV-10`. This real-model omission was observed in G3 runs; the deterministic source-coverage guard now sends such partial orders to human review. The one-SKU healthy fixture exercises the nominal approval path without hiding this known model limitation. A normal status for the *multi-SKU diagnostic* is **never** accepted unless every explicitly named line is present and valid; if missing, only an unresolved, blocked human-review record is an acceptable **safety** outcome.
+| Case | Responsible extractor | Required result |
+|---|---|---|
+| `We need 2 F-200 and 20 PV-10.` | **Deterministic evidence-first** | Both exact items, trusted subtotal $1740, PV-10 stock shortage, `requires_review` |
+| `Please send 20 PV-10.` | **Deterministic evidence-first** | PV-10 × 20, trusted subtotal $1500, stock 15 and `requires_review` |
+| `Please send 2 F-200.` | **Deterministic evidence-first** | F-200 × 2, trusted subtotal $240, `ready_for_approval` **not approved** |
+| `We need PV-10. Please confirm availability.` | **Real Ollama / LLM fallback** | No guessed quantity or priced item; `requires_review`. Provider errors are **not** accepted as a successful LLM diagnostic |
 
-If Qwen extracts the wrong SKU/quantity or requests additional review, the test **fails closed**. Do not fake or bypass it with a lower confidence threshold, altered benchmark, or forced approval. Investigate the real-model output and rerun only after an appropriate engineering decision.
+The test additionally checks unauthenticated 401, wrong-role 403 and no implicit approval. The real LLM's exact-item quality remains assessed independently by the frozen benchmark; the above fallback test is a **safety and connectivity diagnostic**, not a full model-accuracy claim.
 
-## 3. Verify database persistence after API restart
+## Persistence and fail-closed review
 
 ```bash
 docker compose restart api
-# Restart completes before the HTTP server necessarily becomes ready.
 timeout 90 bash -c 'until curl -fsS http://127.0.0.1:8000/health >/dev/null 2>&1; do sleep 2; done'
 python3 scripts/private_demo_smoke.py verify
 ```
 
-This reads the same three synthetic order IDs from `.demo-smoke-state.json`, confirms items/prices/status survived API restart, checks unauthorized access is rejected, and proves an approver cannot bypass `requires_review`. It also records a reviewer acknowledgement for the multi-SKU diagnostic, then verifies the **unresolved issue blocks `reviewed → ready_for_approval` with HTTP 409**. A separate safe order remains eligible for explicit human approval.
+This re-reads all four order IDs from `.demo-smoke-state.json`. It verifies that PostgreSQL retains items, trusted pricing and statuses after API restart, the shortage cannot be directly approved (HTTP 409), forbidden operations return 403, and a reviewer acknowledging the stock-shortage order cannot promote it to ready while any validation issues remain. The ambiguous Qwen order stays under review.
 
-The script does **not** approve, reject, send, or complete any order during unattended phases.
+There is no structured human correction endpoint yet: unresolved orders must remain blocked/rejected, never silently approved.
 
-## 4. Optional human-controlled safe-order completion
+## Separate actual human approval step (not CI)
 
-Only after `submit` and `verify` succeed:
+Only after both noninteractive phases pass:
 
 ```bash
 python3 scripts/private_demo_smoke.py human
 ```
 
-The CLI first **prints validated SKU, quantity, trusted unit price, stock, order ID and subtotal** (without exposing credentials or raw customer text). A human must inspect this **safe synthetic order** and type an explicit approval phrase containing its UUID. Any non-ready order or unresolved validation issue blocks the prompt. A draft response is then generated deterministically; the human must type a second explicit phrase before the app records **SIMULATED send confirmation**. This **does not send email**. The stock-shortage order remains in `requires_review`, never silently fulfilled.
+A **human operator** must inspect the *safe synthetic* order's ID, SKU, quantity, trusted unit price, available stock and subtotal. Only then may they type an order-specific `APPROVE <UUID>` phrase. The CLI displays a deterministic draft; a **second**, separate `RECORD SIMULATED SEND <UUID>` confirmation is required. This only writes a confirmation record: **no email is transmitted**.
 
-The tokens are loaded from the private local credential file; the script never prints them.
+Neither the GitHub runner nor the assistant should impersonate those human confirmations. Without this completed human evidence, G3 remains unaccepted even if CI is green.
 
-## 5. Evidence and teardown
+## Security, limitations, teardown and release decision
 
-Evidence: commit SHA, two CI results, Compose configuration validation, real-model smoke run, migration logs (redacted), statuses, persistence check, denied actions, and human-action demonstration. Use only synthetic values and redact secrets.
+- LLM cannot authorize approval, override catalog prices, stock, credentials or state transitions. Evidence-first mode has a very narrow grammar and abstains on nonmatching text.
+- Static role keys have no full identity lifecycle, tenant isolation, audit attribution or managed rotation. Not suitable for a public deployment.
+- Missing: robust multilingual/free-form extraction, structured correction flow, representative customer dataset, pricing decimal types, pinned image digests and external system integrations.
+- Clean up **only intentionally disposable** demo resources:
 
 ```bash
-# Preserve the named volumes (order data/model) while stopping services:
 docker compose down
-
-# DESTRUCTIVE: delete both database and downloaded model volume when appropriate:
+# Optional destructive cleanup of all synthetic orders and downloaded model:
 docker compose down --volumes
 rm -f .env .demo-credentials.json .demo-smoke-state.json
 ```
 
-Do not run destructive teardown until the data is intentionally disposable. **Any change to .env database password while preserving the old PostgreSQL volume may prevent connection**; either restore the previous credentials or deliberately reset disposable volumes.
-
-## Bounded acceptance and quality disclosure
-
-**What a passing G3 smoke proves:** the real Qwen provider processes the separate single-SKU inventory-shortage and safe-order fixtures; all prices and stock checks come from deterministic code; an incomplete multi-SKU candidate cannot be treated as ready or promoted after reviewer acknowledgement; PostgreSQL persists the records across API restart; the four-role authorization boundary works.
-
-**What it does not prove:** reliable exact multi-item extraction or production readiness. A two-item candidate yielding only F-200, for example, is **PARTIAL**, even though its safe fail-closed routing is acceptable for the safety-path diagnostic. Do not show it as a complete purchase order or invent PV-10 quantity from a model guess. The current demo workflow has **no human correction endpoint**, so an incomplete reviewed order must remain unapproved or be rejected. Implementing a structured correction workflow is a future explicit Gate, not an implicit approval shortcut.
-
-Real-model evidence from a single 85-case benchmark run on G3's earlier head reported schema-valid 85/85, exact 69/85 (81.2%), review FN 0/40, review FP 4, and p95 ~13.87s. These results are from one synthetic, partly duplicate corpus and do **not** establish a stability guarantee across invocations. Inspect the benchmark for the final release SHA and record each failure transparently.
-
-## Acceptance Gate
-
-Before a tagged demo release, require **all** of: merged Security PR #22, final-head CI, PostgreSQL migrations and integration, clean Compose startup, genuine Qwen single-SKU shortage and safe-order smoke, explicit reporting of exact/partial two-SKU diagnostic, blocked promotion of unresolved review records, isolated role checks, persistence proof, and a manually authorized safe-order completion. Missing evidence => G3 **BLOCKED**. Public deployment, actual external email delivery, multi-tenancy, customer PII and production IAM are **out of scope**.
+Do not regenerate a new DB password against an existing PostgreSQL volume without an explicit credential-migration/reset plan. No Release or PR merge without passing final-head CI, PostgreSQL and private Compose; documenting honest LLM-only metrics; actual human sign-off; and separate explicit owner authorization.
