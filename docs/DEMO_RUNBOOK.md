@@ -10,6 +10,7 @@ This runbook describes a **single-organization, zero-paid-service, local-only** 
 - Network access is needed **once** to download Python and container images and the local Qwen model. The application does not use a paid LLM API.
 - Only port `127.0.0.1:8000` is published on the **host**. PostgreSQL and Ollama have no host port mappings. Do not forward port 8000 or connect a public reverse proxy.
 - The app image is built from Python 3.12 and runs as a non-root UID; Alembic migrations execute in a separate one-shot service before API startup.
+- **Inference profile under validation:** Ollama `/api/chat` is sent `think: false`, `options: {temperature: 0, seed: 42}` with Pydantic JSON schema. This is a separately labeled deterministic decoding experiment to reduce Qwen3 sampling variance and reasoning overhead; it **does not guarantee semantic accuracy** or zero timeouts. Scores gathered under the earlier default-generation profile must not be treated as directly comparable to scores under this configuration.
 - **Version caveat:** the Docker images currently use `postgres:16-alpine` and `ollama/ollama:latest`, which are mutable tags. Freeze image digests for any audited release; this is not a production supply-chain guarantee.
 
 ## 1. Start from an approved checkout
