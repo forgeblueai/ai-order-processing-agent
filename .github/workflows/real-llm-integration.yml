@@ -59,7 +59,13 @@ jobs:
       - name: Run real Qwen benchmark
         run: python -m benchmarks.run_qwen
 
-      - name: Upload benchmark report
+      # The frozen v1 scorer historically skips timed-out samples in review
+      # confusion counts. Reject incomplete evidence without rewriting it.
+      - name: Enforce complete benchmark safety evidence
+        run: python -m benchmarks.check_report_integrity
+
+      - name: Upload benchmark report (including failures)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: qwen-benchmark-report
