@@ -2,12 +2,11 @@ name: Qwen 1.7B Thinking Candidate
 
 # Independent optional model-capability experiment. Not a release gate and does
 # not modify the deployed 0.6B demo model, frozen corpus, scorer or threshold.
+# Candidate is deliberately opt-in: an 85-sample 1.7B benchmark is expensive
+# and was previously retriggering on unrelated PR commits. Run manually only
+# after the current local-model profile is explicitly selected for comparison.
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/qwen-1p7b-candidate.yml"
 
 permissions:
   contents: read
