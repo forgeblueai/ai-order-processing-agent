@@ -14,6 +14,16 @@ import sys
 
 def validate_report(report: dict, corpus: list[dict]) -> list[str]:
     errors: list[str] = []
+    if not isinstance(report, dict):
+        return ["benchmark report must be a JSON object"]
+    if not isinstance(corpus, list) or any(
+        not isinstance(case, dict)
+        or not isinstance(case.get("id"), str)
+        or not isinstance(case.get("expected"), dict)
+        or not isinstance(case["expected"].get("requires_review"), bool)
+        for case in corpus
+    ):
+        return ["frozen benchmark corpus has malformed cases"]
     expected_by_id = {case["id"]: case for case in corpus}
     expected_ids = set(expected_by_id)
     if len(expected_by_id) != len(corpus):
@@ -35,9 +45,14 @@ def validate_report(report: dict, corpus: list[dict]) -> list[str]:
     if set(actual_ids) != expected_ids:
         errors.append("case IDs differ from the frozen corpus")
 
+    # A malformed JSON record is *failed evidence*, never an uncaught crash.
     invalid = [
-        f"{case.get('id', 'unknown')}:{case.get('error_type', 'invalid_schema')}"
-        for case in cases
+        (
+            f"{case.get('id', 'unknown')}:{case.get('error_type', 'invalid_schema')}"
+            if isinstance(case, dict)
+            else f"case_index_{i}:malformed_record"
+        )
+        for i, case in enumerate(cases)
         if not isinstance(case, dict) or case.get("schema_valid") is not True
     ]
     reported_valid = report.get("schema_valid_count")
