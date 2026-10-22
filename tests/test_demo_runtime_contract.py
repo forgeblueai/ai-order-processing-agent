@@ -121,3 +121,49 @@ def test_multi_sku_unsafe_partial_or_ready_never_passes(
         })
     with pytest.raises(AssertionError):
         validate_multi_sku_shortage(multi_sku_order)
+
+
+def test_human_approval_summary_exposes_validated_facts_without_credentials() -> None:
+    from scripts.private_demo_smoke import format_human_approval_summary
+
+    order = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "status": "ready_for_approval",
+        "issues": [],
+        "items": [{
+            "sku": "F-200", "quantity": 2,
+            "unit_price": 120.0, "available_stock": 80
+        }],
+        "subtotal": 240.0,
+        "body": "DO-NOT-PRINT-RAW-CUSTOMER-TEXT",
+    }
+    result = format_human_approval_summary(order)
+    assert "F-200 x 2" in result
+    assert "$120.00" in result
+    assert "stock: 80" in result
+    assert "$240.00" in result
+    assert order["id"] in result
+    assert "No external email" in result
+    assert "DO-NOT-PRINT-RAW-CUSTOMER-TEXT" not in result
+
+
+@pytest.mark.parametrize("status,issues,items", [
+    ("requires_review", [{"type": "requires_clarification"}], [{"sku": "F-200"}]),
+    ("reviewed", [], [{"sku": "F-200"}]),
+    ("approved", [], [{"sku": "F-200"}]),
+    ("ready_for_approval", [{"type": "missing_quantity"}], [{"sku": "F-200"}]),
+    ("ready_for_approval", [], []),
+])
+def test_human_approval_summary_rejects_unresolved_or_ineligible_order(
+    status, issues, items
+) -> None:
+    from scripts.private_demo_smoke import format_human_approval_summary
+
+    with pytest.raises(AssertionError):
+        format_human_approval_summary({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "status": status,
+            "issues": issues,
+            "items": items,
+            "subtotal": 0.0,
+        })
