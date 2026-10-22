@@ -1,4 +1,4 @@
-name: Qwen 1.7B Candidate Evaluation
+name: Qwen 1.7B Thinking Candidate
 
 # Independent optional model-capability experiment. Not a release gate and does
 # not modify the deployed 0.6B demo model, frozen corpus, scorer or threshold.
@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 40
     env:
       OLLAMA_MODEL: qwen3:1.7b
+      OLLAMA_THINK: "true"
       OLLAMA_URL: http://127.0.0.1:11434
       PYTHONPATH: .
     steps:
