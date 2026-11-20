@@ -48,7 +48,7 @@ The G3 work in [PR #25](https://github.com/forgeblueai/ai-order-processing-agent
 
 PR #22 merged to `main` at `ab1481147c33388b8a952d0b71d4e821eaecc80e`.
 
-The checks below ran on the exact final PR head (`e78fb19e0d9c422e2b9ecfbdc604ade6d2f88e28)) before merge:
+The checks below ran on the exact final PR head (`e78fb19e0d9c422e2b9ecfbdc604ade6d2f88e28`) before merge:
 
 - [Python CI #76](https://github.com/forgeblueai/ai-order-processing-agent/actions/runs/39281272292): **SUCCESS**, 85 Python tests passed.
 - [PostgreSQL Integration #38](https://github.com/forgeblueai/ai-order-processing-agent/actions/runs/39281271961): **SUCCESS**, migration upgrade, integration test, downgrade, and clean re-upgrade passed.
