@@ -18,6 +18,8 @@ def test_ollama_provider_is_local_keyless_tool_free_and_schema_constrained() -> 
         body = json.loads(request.content)
         assert body["model"] == "qwen3:8b"
         assert body["stream"] is False
+        assert body["think"] is False
+        assert body["options"] == {"temperature": 0, "seed": 42}
         assert body["format"] == ExtractionResult.model_json_schema()
         assert body["format"]["title"] == "ExtractionResult"
         assert set(body["format"]["required"]) == {"intent", "confidence"}
@@ -43,3 +45,31 @@ def test_ollama_provider_fails_closed_when_local_runtime_is_unavailable() -> Non
     )
     with pytest.raises(httpx.HTTPStatusError):
         provider.complete(system_prompt="system", user_text="50 F-200")
+
+
+def test_ollama_provider_supports_explicit_thinking_evaluation_profile() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        data = json.loads(request.content)
+        assert data["think"] is True
+        assert data["options"] == {"temperature": 0, "seed": 42}
+        assert "tools" not in data
+        return httpx.Response(200, json={"message": {"content": json.dumps({
+            "intent": "order_request", "confidence": 0.90, "items": []
+        })}})
+
+    provider = OllamaStructuredCompletionProvider(
+        model="qwen3:1.7b", think=True, client=_client(handler)
+    )
+    assert provider.complete(system_prompt="system", user_text="message")["intent"] == "order_request"
+
+
+def test_ollama_thinking_env_is_opt_in_and_rejects_unknown_values(monkeypatch) -> None:
+    monkeypatch.delenv("OLLAMA_THINK", raising=False)
+    assert OllamaStructuredCompletionProvider.from_env()._think is False
+
+    monkeypatch.setenv("OLLAMA_THINK", "TRUE")
+    assert OllamaStructuredCompletionProvider.from_env()._think is True
+
+    monkeypatch.setenv("OLLAMA_THINK", "yes")
+    with pytest.raises(ValueError, match="OLLAMA_THINK"):
+        OllamaStructuredCompletionProvider.from_env()

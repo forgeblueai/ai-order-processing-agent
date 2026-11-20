@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.security import authenticate, require_role
 from app.ai.extractor import OrderExtractor
+from app.ai.evidence_first import EvidenceFirstOrderExtractor
 from app.ai.ollama_provider import OllamaStructuredCompletionProvider
 from app.ai.provider import LLMOrderExtractor
 from app.adapters.sqlalchemy_order_repository import SQLAlchemyOrderRepository
@@ -21,7 +22,11 @@ router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(auth
 
 
 def get_order_extractor() -> OrderExtractor:
-    return LLMOrderExtractor(OllamaStructuredCompletionProvider.from_env())
+    # Explicit, complete SKU orders are deterministic. Unstructured requests
+    # still reach the real Ollama provider and fail closed on missing evidence.
+    return EvidenceFirstOrderExtractor(
+        LLMOrderExtractor(OllamaStructuredCompletionProvider.from_env())
+    )
 
 
 def get_db_session() -> Generator[Session, None, None]:

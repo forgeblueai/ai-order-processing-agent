@@ -7,3 +7,8 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Locally generated private demo credentials and synthetic order state.
+.demo-credentials.json
+.demo-smoke-state.json
+.env.*

@@ -6,7 +6,7 @@ from app.domain.order import OrderRecord
 from app.ports.customer_response_drafter import CustomerResponseDrafter
 from app.ports.order_repository import OrderRepository
 from app.schemas.order import OrderItem, OrderStatus, ValidationIssue
-from app.services.order_lifecycle import transition_order
+from app.services.order_lifecycle import InvalidOrderTransition, transition_order
 
 
 class OrderNotFoundError(LookupError):
@@ -64,6 +64,13 @@ class OrderApplicationService:
     def transition(self, order_id: UUID, target: OrderStatus) -> OrderRecord:
         current = self.get(order_id)
         validated_target = transition_order(current.status, target)
+        # Review acknowledgement does not resolve missing data, insufficient
+        # stock, or any other persisted validation issue. No correction API
+        # exists yet, so unresolved review orders cannot be approved.
+        if target is OrderStatus.READY_FOR_APPROVAL and current.issues:
+            raise InvalidOrderTransition(
+                "order has unresolved validation issues; correction is required"
+            )
         updated = current.with_status(validated_target)
         self._repository.save(updated)
         return updated

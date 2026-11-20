@@ -1,12 +1,25 @@
 """Fail-closed evidence checks for untrusted LLM-extracted order fields.
 
 This is deliberately a narrow, conservative guard, not a second extractor.
-Missing source evidence sends the order to human review; no field is guessed.
+Missing or invented source evidence sends the order to human review; no field is guessed.
 """
 
 import re
 
 from app.schemas.extraction import ExtractionResult
+
+
+# Recognition only, NOT an alternative SKU/quantity extractor. When a customer
+# explicitly supplies a SKU-shaped token that LLM output omits, fail closed.
+# Restrict to dash-number codes; other catalog formats need a later extension.
+_EXPLICIT_SKU_TOKEN = re.compile(
+    r"(?<![\w-])([A-Za-z][A-Za-z0-9]{0,7}-[0-9]{1,6})(?![\w-])",
+    flags=re.IGNORECASE,
+)
+
+
+def _explicit_skus(text: str) -> set[str]:
+    return {match.group(1).upper() for match in _EXPLICIT_SKU_TOKEN.finditer(text)}
 
 
 def _mentioned_reference(text: str, reference: str) -> list[re.Match[str]]:
@@ -47,6 +60,16 @@ def require_source_evidence(result: ExtractionResult, *, source_text: str) -> Ex
             quantity = None
             needs_review = True
         corrected.append(item.model_copy(update={"product_reference": reference, "quantity": quantity}))
+
+    # Presence-only coverage: do not invent a missing item or quantity.
+    # Omitting an explicit SKU must not produce READY_FOR_APPROVAL.
+    extracted_references = {
+        item.product_reference.upper()
+        for item in corrected
+        if item.product_reference is not None
+    }
+    if _explicit_skus(source_text) - extracted_references:
+        needs_review = True
 
     if not needs_review:
         return result
