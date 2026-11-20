@@ -1,104 +1,73 @@
 # AI Order Processing Agent
 
-Portfolio-grade B2B order processing, validation, and human-in-the-loop automation system.
+**A Python/FastAPI backend for LLM-assisted B2B order processing with deterministic validation and human review.**
 
-**Developed by Anis Torabi — AI Automation & AI Agent Developer**  
-Part of the ForgeBlue AI engineering portfolio.
+This project explores a safer way to process unstructured customer order requests: language models help interpret the request, while application code remains responsible for business rules, authorization, and state transitions.
 
-## Problem
+## Core Workflow
 
-B2B orders often arrive as unstructured emails or messages. Staff must manually read the request, identify products and quantities, check inventory and pricing, handle exceptions, and prepare an order for approval.
-
-This project demonstrates a safer automation architecture: AI is responsible for understanding unstructured input, while deterministic application code owns validation, pricing, inventory checks, and approval rules.
-
-## Sprint 1 — Foundation
-
-Sprint 1 establishes the deterministic core before introducing an LLM:
-
-- FastAPI application and health endpoint
-- Strict Pydantic request/response contracts
-- Mock B2B product catalog and inventory
-- Order processing endpoint
-- Inventory validation and human-review routing
-- Automated API tests
-- Docker runtime
-
-The temporary regex extractor is intentionally isolated behind the processing boundary. Sprint 2 will replace it with structured LLM extraction without moving business rules into the model.
-
-## API
-
-### Health
-
-```http
-GET /health
+```text
+Unstructured customer request
+            |
+            v
+LLM structured extraction (provider boundary)
+            |
+            v
+Pydantic schema + source-evidence checks
+            |
+            v
+Deterministic product, quantity, stock, and pricing validation
+            |
+            v
+Persisted order lifecycle + role-authorized human decisions
 ```
 
-### Process an order
+## Implemented on `main`
 
-```http
-POST /api/v1/orders/process
-Content-Type: application/json
-```
+- **LLM integration:** provider abstraction with a local Ollama structured-completion adapter.
+- **Evidence-aware extraction:** Pydantic contracts and source-evidence checks that prevent unsupported product references or quantities from silently entering business processing.
+- **Deterministic business logic:** product/catalog checks, stock and pricing validation, and explicit order-state transitions remain in application code.
+- **Persistence:** SQLAlchemy order repository and Alembic migrations; SQLite is the default local database, with PostgreSQL integration support.
+- **API authorization:** authenticated order routes with role-specific permissions for operators, reviewers, approvers, and senders.
+- **Evaluation:** an 85-case synthetic corpus, benchmark runner, and measured local-model baseline. Synthetic benchmark results are not production customer metrics.
 
-Example request:
+## Technology
 
-```json
-{
-  "subject": "Order Request - ABC Trading",
-  "body": "We need 50 F-200 and 20 PV-10."
-}
-```
+Python · FastAPI · Pydantic · Ollama · SQLAlchemy · Alembic · SQLite · PostgreSQL · Pytest · Docker
 
-Because only 15 units of `PV-10` are available, the order is routed to human review rather than automatically approved.
-
-## Run locally
+## Development
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# Configure DATABASE_URL, Ollama settings, and ORDER_API_KEY_HASHES_JSON
+# as described in docs/SECURITY_GATE.md. Never commit plaintext tokens.
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-Open the interactive API documentation at `http://127.0.0.1:8000/docs`.
-
-## Tests
+Run the automated tests:
 
 ```bash
 pytest
 ```
 
-## Docker
+## Security and Operational Boundaries
 
-```bash
-docker compose up --build
-```
+- Model output is untrusted data. It cannot set trusted prices, inventory, roles, permissions, or approval outcomes.
+- Ambiguous, unsupported, or invalid extraction must be reviewed or rejected rather than silently promoted to an approved order.
+- The current bearer-token/RBAC model is a bounded application control, not enterprise identity management or multi-tenant authorization.
+- The `response/send` endpoint records a human confirmation in the order lifecycle; it does **not** deliver an external email.
+- The project is not presented as production-ready.
 
-## Architecture principle
+## Current Status — 2026-11-20
 
-```text
-Untrusted customer input
-        ↓
-Understanding / extraction
-        ↓
-Strict structured schema
-        ↓
-Deterministic validation
-        ↓
-Inventory + pricing rules
-        ↓
-Human approval / review
-```
+- Reliability improvements ([PR #19](https://github.com/forgeblueai/ai-order-processing-agent/pull/19)) and API authentication/RBAC ([PR #22](https://github.com/forgeblueai/ai-order-processing-agent/pull/22)) have been merged into `main`.
+- The reproducible private API + PostgreSQL + Ollama demo is being validated in [Draft PR #25](https://github.com/forgeblueai/ai-order-processing-agent/pull/25). The current PR head is `ad299df42dd84f38ab113fe0c7c6fc0844b72d3f`.
+- On that exact PR head, CI #120, PostgreSQL Integration #82, Private Demo Stack Integration #41, and Real LLM Integration #54 all succeeded on 2026-11-20. The Real LLM workflow completed its 85-case benchmark integrity step and uploaded the `qwen-benchmark-report` artifact.
+- PR #25 remains **open, Draft, and unmerged**. Manual human acceptance is still required before G3 can be accepted; the demo is not a public release.
+- The complete PostgreSQL/Ollama Compose runtime is not part of the current `main` branch.
 
-Customer text is treated as untrusted data. It cannot directly change prices, inventory, approval rules, or database state.
-
-## Roadmap
-
-- Sprint 2: LLM structured extraction and ambiguity handling
-- Sprint 3: PostgreSQL persistence and order state machine
-- Sprint 4: approval/rejection workflow and response drafting
-- Sprint 5: security hardening, evaluation dataset, benchmarks, CI, and portfolio demo
-
-## Status
-
-🚧 Active portfolio project — Sprint 1 foundation.
+See [the benchmark baseline](benchmarks/BASELINE_QWEN3_0.6B.md), [security gate](docs/SECURITY_GATE.md), and [portfolio delivery checklist](docs/PORTFOLIO_DELIVERY.md) for methods, limits, and status.
